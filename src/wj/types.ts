@@ -20,7 +20,7 @@ export const generateImageInputSchema = z.object({
   prompt: z.string().trim().min(1).max(8_000).describe("A detailed prompt describing the image to generate."),
   model: imageModelSchema.default("gpt-image-2").describe("Use gpt-image-2 unless the user explicitly requests another model."),
   aspect_ratio: aspectRatioSchema.default("1:1").describe("Output image aspect ratio."),
-  resolution: resolutionSchema.default("1K").describe("Output resolution."),
+  resolution: resolutionSchema.default("2K").describe("Default to 2K unless the user explicitly requests 1K or 4K."),
   reference_image_urls: z
     .array(z.string().url().refine((value) => new URL(value).protocol === "https:", "Reference images must use HTTPS"))
     .max(4)
@@ -38,7 +38,7 @@ export const editImageInputSchema = z.object({
     .describe("Optional ChatGPT image attachments used as style, text, layout, or identity references."),
   model: imageModelSchema.default("gpt-image-2").describe("Use gpt-image-2 unless the user explicitly requests another model."),
   aspect_ratio: aspectRatioSchema.default("1:1").describe("Output image aspect ratio."),
-  resolution: resolutionSchema.default("1K").describe("Output resolution."),
+  resolution: resolutionSchema.default("2K").describe("Default to 2K unless the user explicitly requests 1K or 4K."),
 });
 
 export const imageAssetSchema = z.object({

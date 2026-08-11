@@ -3,7 +3,8 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { GenerationService } from "../src/generation-service.js";
-import { createWjMcpServer, IMAGE_WIDGET_URI, IMAGE_WIDGET_URIS, WJ_IMAGE_SERVER_INSTRUCTIONS } from "../src/mcp/server.js";
+import { createWjMcpServer, IMAGE_WIDGET_URI, WJ_IMAGE_SERVER_INSTRUCTIONS } from "../src/mcp/server.js";
+import { WjApiError } from "../src/wj/client.js";
 import { testConfig, testLogger } from "./helpers.js";
 
 describe("WJ MCP server", () => {
@@ -15,7 +16,7 @@ describe("WJ MCP server", () => {
   it("advertises and calls image generation and private-attachment editing tools", async () => {
     const generate = vi.fn().mockResolvedValue({
       model_id: "gpt-image-2",
-      resolution: "1K",
+      resolution: "2K",
       aspect_ratio: "1:1",
       duration_ms: 900,
       assets: [{ type: "image", mime_type: "image/png", url: "https://img.downk.cc/generated.png", width: 1024, height: 1024 }],
@@ -85,6 +86,14 @@ describe("WJ MCP server", () => {
     expect(generate).toHaveBeenCalledWith("wj-shared-access", expect.objectContaining({
       model: "gpt-image-2",
       aspect_ratio: "1:1",
+      resolution: "2K",
+    }));
+
+    await client.callTool({
+      name: "generate_image",
+      arguments: { prompt: "A small explicit-resolution image", resolution: "1K" },
+    });
+    expect(generate).toHaveBeenNthCalledWith(2, "wj-shared-access", expect.objectContaining({
       resolution: "1K",
     }));
 
@@ -115,7 +124,7 @@ describe("WJ MCP server", () => {
       prompt: "Add the handwritten name from image two to the board in image one",
       model: "gpt-image-2",
       aspect_ratio: "1:1",
-      resolution: "1K",
+      resolution: "2K",
       reference_image_urls: [
         "https://files.openai.example/target.png?signature=one",
         "https://files.openai.example/reference.png?signature=two",
@@ -123,22 +132,42 @@ describe("WJ MCP server", () => {
     });
 
     const resources = await client.listResources();
-    expect(resources.resources.map((resource) => resource.uri)).toEqual(expect.arrayContaining([...IMAGE_WIDGET_URIS]));
+    expect(resources.resources.map((resource) => resource.uri)).toEqual([IMAGE_WIDGET_URI]);
 
-    for (const uri of IMAGE_WIDGET_URIS) {
-      const resource = await client.readResource({ uri });
-      expect(resource.contents[0]).toEqual(expect.objectContaining({
-        uri,
-        mimeType: "text/html;profile=mcp-app",
-        text: "<!doctype html><p>widget</p>",
-        _meta: expect.objectContaining({
-          ui: expect.objectContaining({
-            csp: expect.objectContaining({
-              resourceDomains: expect.arrayContaining(["https://img.downk.cc"]),
-            }),
+    const resource = await client.readResource({ uri: IMAGE_WIDGET_URI });
+    expect(resource.contents[0]).toEqual(expect.objectContaining({
+      uri: IMAGE_WIDGET_URI,
+      mimeType: "text/html;profile=mcp-app",
+      text: "<!doctype html><p>widget</p>",
+      _meta: expect.objectContaining({
+        ui: expect.objectContaining({
+          csp: expect.objectContaining({
+            resourceDomains: expect.arrayContaining(["https://img.downk.cc"]),
           }),
         }),
-      }));
-    }
+      }),
+    }));
+  });
+
+  it("reports the actual WJ authorization failure instead of assuming the API key is invalid", async () => {
+    const generation = {
+      generate: vi.fn().mockRejectedValue(new WjApiError("authorization policy denied the request", 403)),
+    } as unknown as GenerationService;
+    const server = createWjMcpServer({ config: testConfig(), generation, logger: testLogger(), widgetHtml: "<!doctype html><p>widget</p>" });
+    const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    closeCallbacks.push(async () => { await client.close(); await server.close(); });
+
+    const response = await client.callTool({
+      name: "generate_image",
+      arguments: { prompt: "A test image" },
+    });
+
+    expect(response.isError).toBe(true);
+    expect(response.content).toEqual([{
+      type: "text",
+      text: "WJ request was rejected with HTTP 403: authorization policy denied the request",
+    }]);
   });
 });

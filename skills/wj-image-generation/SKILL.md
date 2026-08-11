@@ -19,7 +19,7 @@ Use the WJ plugin's `generate_image` and `edit_image` tools for explicit WJ requ
 ## Build the WJ request
 
 1. Preserve the user's prompt, subject, style, composition, aspect ratio, resolution, and reference-image intent.
-2. Default to `gpt-image-2`, `1K`, and `1:1` only when the user does not specify supported alternatives.
+2. Default to `gpt-image-2`, `2K`, and `1:1` only when the user does not specify supported alternatives.
 3. Use `nano-banana-2` only when the user explicitly requests it.
 4. Pass reference image URLs through `reference_image_urls` when provided.
 5. For ChatGPT attachments, put the image being changed in `target_image` and style, text, layout, or identity references in `reference_images`.
