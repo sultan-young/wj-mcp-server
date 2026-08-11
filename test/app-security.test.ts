@@ -46,6 +46,7 @@ describe("HTTP security and discovery", () => {
       issuer: "http://127.0.0.1:6070",
       registration_endpoint: "http://127.0.0.1:6070/reg",
       code_challenge_methods_supported: ["S256"],
+      scopes_supported: ["openid", "offline_access", "wj:image"],
     }));
   });
 });
