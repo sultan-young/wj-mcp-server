@@ -10,7 +10,7 @@ describe("application version", () => {
       readFileSync(new URL("../package.json", import.meta.url), "utf8"),
     ) as { version: string };
 
-    expect(APP_VERSION).toBe("0.1.2");
+    expect(APP_VERSION).toBe("0.1.3");
     expect(packageJson.version).toBe(APP_VERSION);
   });
 });

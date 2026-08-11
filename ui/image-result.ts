@@ -1,24 +1,28 @@
 import { App, applyDocumentTheme, applyHostStyleVariables } from "@modelcontextprotocol/ext-apps";
 import { createIcons, Download, ExternalLink } from "lucide";
 
+import { APP_VERSION } from "../src/version.js";
+import {
+  createPersistedImageState,
+  getImageResult,
+  isImageResult,
+  type ImageResult,
+} from "./image-result-state.js";
 import "./styles.css";
 
-type ImageAsset = {
-  url: string;
-  mime_type?: string;
-  width?: number;
-  height?: number;
+type OpenAiBridge = {
+  toolOutput?: unknown;
+  widgetState?: unknown;
+  setWidgetState?: (state: unknown) => void;
 };
 
-type ImageResult = {
-  model: string;
-  resolution?: string;
-  aspectRatio?: string;
-  durationMs?: number;
-  assets: ImageAsset[];
-};
+declare global {
+  interface Window {
+    openai?: OpenAiBridge;
+  }
+}
 
-const app = new App({ name: "WJ image result", version: "0.1.0" }, {});
+const app = new App({ name: "WJ image result", version: APP_VERSION }, {});
 const loading = requiredElement<HTMLDivElement>("loading");
 const errorBox = requiredElement<HTMLDivElement>("error");
 const result = requiredElement<HTMLElement>("result");
@@ -33,10 +37,10 @@ createIcons({ icons: { Download, ExternalLink } });
 
 app.addEventListener("toolresult", (params) => {
   if (params.isError || !isImageResult(params.structuredContent)) {
-    showError();
+    if (!current) showResultUnavailable();
     return;
   }
-  render(params.structuredContent);
+  render(params.structuredContent, true);
 });
 
 app.onhostcontextchanged = applyHostContext;
@@ -65,7 +69,11 @@ downloadButton.addEventListener("click", async () => {
 await app.connect();
 applyHostContext(app.getHostContext());
 
-function render(data: ImageResult): void {
+const restoredResult = getImageResult(window.openai?.toolOutput)
+  ?? getImageResult(window.openai?.widgetState);
+if (!current && restoredResult) render(restoredResult, false);
+
+function render(data: ImageResult, persist: boolean): void {
   current = data;
   gallery.replaceChildren();
 
@@ -75,9 +83,10 @@ function render(data: ImageResult): void {
     image.alt = `WJ 生成图片 ${index + 1}`;
     image.loading = index === 0 ? "eager" : "lazy";
     image.decoding = "async";
+    image.referrerPolicy = "no-referrer";
     if (asset.width) image.width = asset.width;
     if (asset.height) image.height = asset.height;
-    image.addEventListener("error", showError, { once: true });
+    image.addEventListener("error", () => showImageLoadError(image), { once: true });
     gallery.append(image);
   }
 
@@ -86,21 +95,23 @@ function render(data: ImageResult): void {
   loading.hidden = true;
   errorBox.hidden = true;
   result.hidden = false;
+
+  if (persist) window.openai?.setWidgetState?.(createPersistedImageState(data));
 }
 
-function showError(): void {
+function showResultUnavailable(): void {
   loading.hidden = true;
   result.hidden = true;
+  errorBox.textContent = "图片结果暂时无法恢复，请重新生成。";
   errorBox.hidden = false;
 }
 
-function isImageResult(value: unknown): value is ImageResult {
-  if (!value || typeof value !== "object") return false;
-  const record = value as Partial<ImageResult>;
-  return typeof record.model === "string"
-    && Array.isArray(record.assets)
-    && record.assets.length > 0
-    && record.assets.every((asset) => asset && typeof asset.url === "string" && asset.url.startsWith("https://"));
+function showImageLoadError(image: HTMLImageElement): void {
+  image.hidden = true;
+  loading.hidden = true;
+  result.hidden = false;
+  errorBox.textContent = "图片加载失败，你仍可使用下方的“打开原图”按钮。";
+  errorBox.hidden = false;
 }
 
 function applyHostContext(context: ReturnType<App["getHostContext"]>): void {
