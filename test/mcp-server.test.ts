@@ -30,6 +30,7 @@ describe("WJ MCP server", () => {
     const tools = await client.listTools();
     const tool = tools.tools.find((item) => item.name === "generate_image");
     expect(tool?._meta?.["ui/resourceUri"]).toBe(IMAGE_WIDGET_URI);
+    expect(tool?._meta?.["openai/outputTemplate"]).toBe(IMAGE_WIDGET_URI);
     expect(tool?.inputSchema).toEqual(expect.objectContaining({ type: "object" }));
     expect(tool?._meta?.securitySchemes).toEqual([{ type: "oauth2", scopes: ["wj:image"] }]);
 
@@ -55,6 +56,13 @@ describe("WJ MCP server", () => {
     expect(resource.contents[0]).toEqual(expect.objectContaining({
       mimeType: "text/html;profile=mcp-app",
       text: "<!doctype html><p>widget</p>",
+      _meta: expect.objectContaining({
+        ui: expect.objectContaining({
+          csp: expect.objectContaining({
+            resourceDomains: expect.arrayContaining(["https://img.downk.cc"]),
+          }),
+        }),
+      }),
     }));
   });
 });

@@ -10,7 +10,7 @@ import type { AppLogger } from "../logger.js";
 import { WjApiError } from "../wj/client.js";
 import { aspectRatioSchema, generateImageInputSchema, imageAssetSchema, resolutionSchema } from "../wj/types.js";
 
-export const IMAGE_WIDGET_URI = "ui://wj/image-result.html";
+export const IMAGE_WIDGET_URI = "ui://wj/image-result-v2.html";
 
 type McpServerDependencies = {
   config: AppConfig;
@@ -49,7 +49,8 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
         openWorldHint: true,
       },
       _meta: {
-        ui: { resourceUri: IMAGE_WIDGET_URI, visibility: ["model"] },
+        ui: { resourceUri: IMAGE_WIDGET_URI },
+        "openai/outputTemplate": IMAGE_WIDGET_URI,
         securitySchemes: [{ type: "oauth2", scopes: [WJ_IMAGE_SCOPE] }],
         "openai/toolInvocation/invoking": "WJ 正在生成图片",
         "openai/toolInvocation/invoked": "WJ 图片已生成",
