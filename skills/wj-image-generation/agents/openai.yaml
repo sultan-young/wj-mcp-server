@@ -1,0 +1,13 @@
+interface:
+  display_name: "WJ Image Generation"
+  short_description: "Route WJ generation, attachment editing, and image-limit fallbacks"
+  default_prompt: "Use $wj-image-generation to generate or edit an image with WJ."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "wj-ai-image"
+      description: "WJ image generation MCP server"
+      transport: "streamable_http"
+      url: "https://mcp.zaowuwujie.ltd/mcp"
+policy:
+  allow_implicit_invocation: true

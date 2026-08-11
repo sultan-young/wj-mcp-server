@@ -49,4 +49,36 @@ describe("WjClient", () => {
     })).rejects.toEqual(expect.objectContaining({ status: 503, message: "busy" }));
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("forwards ChatGPT attachment download URLs as WJ input_images", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      data: {
+        model_id: "gpt-image-2",
+        resolution: "1K",
+        aspect_ratio: "1:1",
+        assets: [{ type: "image", mime_type: "image/png", url: "https://img.downk.cc/edited.png" }],
+      },
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const client = new WjClient(testConfig(), testLogger(), fetchMock);
+
+    await client.generateImage({
+      model: "gpt-image-2",
+      prompt: "Copy the name from image two onto image one",
+      aspect_ratio: "1:1",
+      resolution: "1K",
+      reference_image_urls: [
+        "https://files.openai.example/target.png?signature=one",
+        "https://files.openai.example/reference.png?signature=two",
+      ],
+    });
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(JSON.parse(String(init?.body))).toEqual(expect.objectContaining({
+      input_images: [
+        "https://files.openai.example/target.png?signature=one",
+        "https://files.openai.example/reference.png?signature=two",
+      ],
+    }));
+  });
 });
