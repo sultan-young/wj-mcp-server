@@ -80,8 +80,12 @@ describe("WJ MCP server", () => {
       model: "gpt-image-2",
       assets: [expect.objectContaining({ url: "https://img.downk.cc/generated.png" })],
     }));
-    expect(response.content).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: "resource_link", uri: "https://img.downk.cc/generated.png" }),
+    expect(response.content).toEqual([expect.objectContaining({
+      type: "text",
+      text: expect.not.stringContaining("https://img.downk.cc/generated.png"),
+    })]);
+    expect(response.content).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "resource_link" }),
     ]));
     expect(generate).toHaveBeenCalledWith("wj-shared-access", expect.objectContaining({
       model: "gpt-image-2",

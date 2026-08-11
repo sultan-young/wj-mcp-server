@@ -196,22 +196,14 @@ function toImageToolResult(
     ...(result.duration_ms === undefined ? {} : { durationMs: result.duration_ms }),
     assets,
   };
-  const links = assets.map((asset, index) => `![WJ ${action} image ${index + 1}](${asset.url})\n${asset.url}`).join("\n\n");
 
   return {
     structuredContent,
     content: [
       {
         type: "text" as const,
-        text: `WJ ${action} ${assets.length} image${assets.length === 1 ? "" : "s"} with ${result.model_id}.\n\n${links}`,
+        text: `WJ ${action} ${assets.length} image${assets.length === 1 ? "" : "s"} with ${result.model_id}. The associated WJ component displays the result.`,
       },
-      ...assets.map((asset, index) => ({
-        type: "resource_link" as const,
-        uri: asset.url,
-        name: `wj-image-${index + 1}`,
-        title: `WJ 图片 ${index + 1}`,
-        mimeType: asset.mime_type,
-      })),
     ],
   };
 }
