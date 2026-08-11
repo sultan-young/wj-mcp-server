@@ -96,7 +96,7 @@ curl https://mcp.wj.zaowuwujie.ltd/.well-known/oauth-protected-resource/mcp
 
 推荐使用规则见 `docs/chatgpt-instructions.md`。显式说“使用 WJ 生图”可以稳定触发；ChatGPT 内置生图限流后的回退取决于平台是否把失败暴露给模型，MCP 服务本身无法读取账号内部额度。
 
-生成多张图片时，ChatGPT 应为每张图片分别调用一次 `generate_image`，并在同一个工具调用轮次中并发发出，不能等待上一张完成后再开始下一张。同提示词变体在每次调用中复用相同提示词，不同图片则分别保留各自提示词。服务端通过 `IMAGE_MAX_CONCURRENCY` 限制实际同时请求 WJ 的数量，每张图片仍分别计入分钟和每日额度。
+生成多张图片时，ChatGPT 应为每张图片分别调用一次 `generate_image`，并在同一个工具调用轮次中并发发出，不能等待上一张完成后再开始下一张。同提示词变体在每次调用中复用相同提示词，不同图片则分别保留各自提示词。服务端通过 `IMAGE_MAX_CONCURRENCY` 限制每个 OAuth 插件终端实际同时请求 WJ 的数量，默认每个终端 10 个；不同终端使用彼此独立的并发队列。
 
 每次成功调用都会返回 `resultId`、`expiresAt` 和原图链接。结果默认在 Redis 中保存 30 天；如果 ChatGPT 的图片组件没有拿到完整结果，组件会自动调用 `get_image_result`，GPT 也可以根据 `resultId` 主动调用该工具并重新展示图片。模型仍可使用返回文本中的原图链接，不能因为组件没有显示而重新生成。恢复操作不会请求 WJ，也不会消耗图片额度。
 
@@ -104,7 +104,7 @@ curl https://mcp.wj.zaowuwujie.ltd/.well-known/oauth-protected-resource/mcp
 
 - 泄露共享口令时，修改 `MCP_SHARED_PASSWORD`，并清理 Redis 中的 OAuth 状态后让成员重新连接。只修改口令不会撤销已经签发的刷新令牌。
 - 泄露 WJ Key 时，在 WJ 开放平台撤销并重发。不要把真实 Key 提交到 Git。
-- `IMAGE_DAILY_LIMIT` 是第一版的全局成本上限。因为还没有团队身份，所有连接共享同一额度池。
+- `IMAGE_MAX_CONCURRENCY` 是每个 OAuth 插件终端的并发上限，不是整个服务的共享上限。图片请求不再额外设置每分钟或每日限制。
 - 图片 CDN 改变时，把新 HTTPS Origin 加入 `IMAGE_RESOURCE_DOMAINS`，否则 ChatGPT Widget 的 CSP 会阻止图片加载。
 - 建议备份 Docker volume `redis-data`，否则恢复后需要成员重新授权。
 

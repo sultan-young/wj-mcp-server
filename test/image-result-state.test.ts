@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { createPersistedImageState, getImageResult, getImageResultId } from "../ui/image-result-state.js";
+import {
+  createPersistedImageState,
+  getImageResult,
+  getImageResultId,
+  getImageResultIdKey,
+  getImageResultKey,
+  imageResultMatchesBinding,
+} from "../ui/image-result-state.js";
 
 const imageResult = {
   model: "gpt-image-2",
@@ -36,6 +43,16 @@ describe("image result state", () => {
         structuredContent: { resultId: "wj_img_recoverable" },
       },
     })).toBe("wj_img_recoverable");
+  });
+
+  it("keeps a widget bound to one result during concurrent tool calls", () => {
+    const first = { ...imageResult, resultId: "wj_img_first" };
+    const second = { ...imageResult, resultId: "wj_img_second" };
+    const bindingKey = getImageResultKey(first);
+
+    expect(bindingKey).toBe(getImageResultIdKey("wj_img_first"));
+    expect(imageResultMatchesBinding(bindingKey, first)).toBe(true);
+    expect(imageResultMatchesBinding(bindingKey, second)).toBe(false);
   });
 
   it("rejects incomplete persisted data", () => {

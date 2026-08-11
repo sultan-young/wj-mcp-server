@@ -83,7 +83,8 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
       try {
         const input = generateImageInputSchema.parse(rawInput);
         const subject = String(extra.authInfo?.extra?.subject ?? "wj-shared-access");
-        const result = await generation.generate(subject, input);
+        const terminalId = String(extra.authInfo?.extra?.terminalId ?? extra.authInfo?.clientId ?? subject);
+        const result = await generation.generate(terminalId, input);
         return await toImageToolResult(
           imageResults,
           logger,
@@ -133,11 +134,12 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
       try {
         const input = editImageInputSchema.parse(rawInput);
         const subject = String(extra.authInfo?.extra?.subject ?? "wj-shared-access");
+        const terminalId = String(extra.authInfo?.extra?.terminalId ?? extra.authInfo?.clientId ?? subject);
         const referenceImageUrls = [
           input.target_image.download_url,
           ...(input.reference_images ?? []).map((file) => file.download_url),
         ];
-        const result = await generation.generate(subject, {
+        const result = await generation.generate(terminalId, {
           prompt: input.prompt,
           model: input.model,
           aspect_ratio: input.aspect_ratio,

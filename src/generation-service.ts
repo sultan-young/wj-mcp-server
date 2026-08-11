@@ -1,23 +1,39 @@
 import pLimit from "p-limit";
 
 import type { AppConfig } from "./config.js";
-import type { UsageLimits } from "./limits.js";
 import { WjClient } from "./wj/client.js";
 import type { GenerateImageInput, WjImageData } from "./wj/types.js";
 
 export class GenerationService {
-  private readonly queue;
+  private readonly queues = new Map<string, ReturnType<typeof pLimit>>();
+  private readonly maxConcurrency: number;
 
   constructor(
     private readonly client: WjClient,
-    private readonly limits: UsageLimits,
     config: AppConfig,
   ) {
-    this.queue = pLimit(config.IMAGE_MAX_CONCURRENCY);
+    this.maxConcurrency = config.IMAGE_MAX_CONCURRENCY;
   }
 
-  async generate(subject: string, input: GenerateImageInput): Promise<WjImageData> {
-    await this.limits.consumeImage(subject);
-    return this.queue(() => this.client.generateImage(input));
+  async generate(terminalId: string, input: GenerateImageInput): Promise<WjImageData> {
+    const queue = this.getQueue(terminalId);
+    try {
+      return await queue(() => this.client.generateImage(input));
+    } finally {
+      queueMicrotask(() => {
+        if (queue.activeCount === 0 && queue.pendingCount === 0 && this.queues.get(terminalId) === queue) {
+          this.queues.delete(terminalId);
+        }
+      });
+    }
+  }
+
+  private getQueue(terminalId: string): ReturnType<typeof pLimit> {
+    const existing = this.queues.get(terminalId);
+    if (existing) return existing;
+
+    const queue = pLimit(this.maxConcurrency);
+    this.queues.set(terminalId, queue);
+    return queue;
   }
 }

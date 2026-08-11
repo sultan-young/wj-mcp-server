@@ -6,6 +6,9 @@ import {
   createPersistedImageState,
   getImageResult,
   getImageResultId,
+  getImageResultIdKey,
+  getImageResultKey,
+  imageResultMatchesBinding,
   type ImageResult,
 } from "./image-result-state.js";
 import "./styles.css";
@@ -33,17 +36,21 @@ const details = requiredElement<HTMLSpanElement>("details");
 const openButton = requiredElement<HTMLButtonElement>("open");
 const downloadButton = requiredElement<HTMLButtonElement>("download");
 let current: ImageResult | undefined;
+let boundResultKey: string | undefined;
 let recoveryInFlight: Promise<void> | undefined;
+let compatibilityRestoreTimer: number | undefined;
 
 createIcons({ icons: { Download, ExternalLink } });
 
 app.addEventListener("toolresult", (params) => {
+  cancelCompatibilityRestore();
   const imageResult = getImageResult(params);
   if (params.isError || !imageResult) {
     if (!current && !params.isError) void recoverFromResultId(getImageResultId(params));
     else if (!current) showResultUnavailable();
     return;
   }
+  if (!bindImageResult(imageResult)) return;
   render(imageResult, true);
 });
 
@@ -81,14 +88,24 @@ window.addEventListener("openai:set_globals", (event) => {
 
 function restoreFromOpenAiGlobals(bridge: OpenAiBridge | undefined): void {
   if (current || !bridge) return;
-  const sources = [bridge.toolOutput, bridge.toolResponseMetadata, bridge.widgetState];
-  const restoredResult = sources.map(getImageResult).find(Boolean);
-  if (restoredResult) render(restoredResult, false);
-  else void recoverFromResultId(sources.map(getImageResultId).find(Boolean));
+  const stateResult = getImageResult(bridge.widgetState);
+  if (stateResult && bindImageResult(stateResult)) {
+    render(stateResult, false);
+    return;
+  }
+
+  const stateResultId = getImageResultId(bridge.widgetState);
+  if (stateResultId) {
+    void recoverFromResultId(stateResultId);
+    return;
+  }
+
+  scheduleCompatibilityRestore(bridge);
 }
 
 async function recoverFromResultId(resultId: string | undefined): Promise<void> {
-  if (!resultId || current || recoveryInFlight) return;
+  if (!resultId || current || recoveryInFlight || !bindResultId(resultId)) return;
+  cancelCompatibilityRestore();
   recoveryInFlight = (async () => {
     try {
       const restored = await app.callServerTool({
@@ -96,7 +113,7 @@ async function recoverFromResultId(resultId: string | undefined): Promise<void> 
         arguments: { result_id: resultId },
       });
       const imageResult = getImageResult(restored);
-      if (imageResult) render(imageResult, true);
+      if (imageResult && bindImageResult(imageResult)) render(imageResult, true);
       else showResultUnavailable();
     } catch {
       showResultUnavailable();
@@ -108,7 +125,14 @@ async function recoverFromResultId(resultId: string | undefined): Promise<void> 
 }
 
 function render(data: ImageResult, persist: boolean): void {
+  const isSameResult = current !== undefined && getImageResultKey(current) === getImageResultKey(data);
   current = data;
+  if (isSameResult) {
+    updateMetadata(data);
+    if (persist) window.openai?.setWidgetState?.(createPersistedImageState(data));
+    return;
+  }
+
   gallery.replaceChildren();
 
   for (const [index, asset] of data.assets.entries()) {
@@ -124,19 +148,57 @@ function render(data: ImageResult, persist: boolean): void {
     gallery.append(image);
   }
 
+  updateMetadata(data);
+
+  if (persist) window.openai?.setWidgetState?.(createPersistedImageState(data));
+}
+
+function bindImageResult(imageResult: ImageResult): boolean {
+  if (!imageResultMatchesBinding(boundResultKey, imageResult)) return false;
+  boundResultKey ??= getImageResultKey(imageResult);
+  return true;
+}
+
+function bindResultId(resultId: string): boolean {
+  const resultKey = getImageResultIdKey(resultId);
+  if (boundResultKey && boundResultKey !== resultKey) return false;
+  boundResultKey ??= resultKey;
+  return true;
+}
+
+function scheduleCompatibilityRestore(bridge: OpenAiBridge): void {
+  cancelCompatibilityRestore();
+  compatibilityRestoreTimer = window.setTimeout(() => {
+    compatibilityRestoreTimer = undefined;
+    if (current || boundResultKey) return;
+    const sources = [bridge.toolOutput, bridge.toolResponseMetadata];
+    const restoredResult = sources.map(getImageResult).find((value): value is ImageResult => value !== undefined);
+    if (restoredResult && bindImageResult(restoredResult)) {
+      render(restoredResult, false);
+      return;
+    }
+    void recoverFromResultId(sources.map(getImageResultId).find((value): value is string => value !== undefined));
+  }, 750);
+}
+
+function cancelCompatibilityRestore(): void {
+  if (compatibilityRestoreTimer === undefined) return;
+  window.clearTimeout(compatibilityRestoreTimer);
+  compatibilityRestoreTimer = undefined;
+}
+
+function updateMetadata(data: ImageResult): void {
   model.textContent = data.model;
   details.textContent = [data.resolution, data.aspectRatio, formatDuration(data.durationMs)].filter(Boolean).join(" · ");
   loading.hidden = true;
   errorBox.hidden = true;
   result.hidden = false;
-
-  if (persist) window.openai?.setWidgetState?.(createPersistedImageState(data));
 }
 
 function showResultUnavailable(): void {
   loading.hidden = true;
   result.hidden = true;
-  errorBox.textContent = "图片结果暂时无法恢复，请重新生成。";
+  errorBox.textContent = "图片结果暂时无法恢复，请使用消息中的原图链接。";
   errorBox.hidden = false;
 }
 

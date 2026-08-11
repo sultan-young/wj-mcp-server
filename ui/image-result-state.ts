@@ -75,6 +75,19 @@ export function getImageResultId(value: unknown): string | undefined {
   return undefined;
 }
 
+export function getImageResultIdKey(resultId: string): string {
+  return `result:${resultId}`;
+}
+
+export function getImageResultKey(imageResult: ImageResult): string {
+  if (imageResult.resultId) return getImageResultIdKey(imageResult.resultId);
+  return `assets:${imageResult.assets.map((asset) => asset.url).join("\n")}`;
+}
+
+export function imageResultMatchesBinding(bindingKey: string | undefined, imageResult: ImageResult): boolean {
+  return bindingKey === undefined || bindingKey === getImageResultKey(imageResult);
+}
+
 export function createPersistedImageState(imageResult: ImageResult) {
   return {
     modelContent: `WJ image result${imageResult.resultId ? ` ${imageResult.resultId}` : ""}: ${imageResult.model}, ${imageResult.assets.length} asset(s).`,

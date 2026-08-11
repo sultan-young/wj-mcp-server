@@ -125,7 +125,10 @@ export function createAuthServices(
         scopes: [...token.scopes],
         expiresAt: token.exp,
         resource: config.mcpUrl,
-        extra: { subject: token.accountId ?? SHARED_ACCOUNT_ID },
+        extra: {
+          subject: token.accountId ?? SHARED_ACCOUNT_ID,
+          terminalId: token.grantId ?? token.clientId,
+        },
       };
     },
   };

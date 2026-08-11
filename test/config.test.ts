@@ -9,7 +9,7 @@ describe("loadConfig", () => {
     expect(config.mcpUrl.href).toBe("http://127.0.0.1:6070/mcp");
     expect(config.WJ_DEFAULT_MODEL).toBe("gpt-image-2");
     expect(config.REGISTRATIONS_PER_HOUR).toBe(200);
-    expect(config.IMAGE_MAX_CONCURRENCY).toBe(5);
+    expect(config.IMAGE_MAX_CONCURRENCY).toBe(10);
     expect(config.IMAGE_RESULT_TTL_SECONDS).toBe(2_592_000);
     expect(config.imageResourceDomains).toContain("https://wj.example.com");
   });

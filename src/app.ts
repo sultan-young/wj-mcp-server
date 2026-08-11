@@ -36,7 +36,7 @@ export async function createApplication(dependencies: AppDependencies) {
   const widgetHtml = dependencies.widgetHtml ?? await readFile(resolve(process.cwd(), "dist/ui/image-result.html"), "utf8");
   const limits = new UsageLimits(redis, config);
   const wjClient = new WjClient(config, logger, dependencies.fetchImpl);
-  const generation = new GenerationService(wjClient, limits, config);
+  const generation = new GenerationService(wjClient, config);
   const imageResults = new ImageResultStore(redis, config.IMAGE_RESULT_TTL_SECONDS);
   const auth = createAuthServices(config, redis, limits, logger);
   const app = createMcpExpressApp({ host: config.HOST, allowedHosts: config.ALLOWED_HOSTS });

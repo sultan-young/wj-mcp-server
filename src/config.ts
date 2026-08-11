@@ -37,9 +37,7 @@ const envSchema = z.object({
   OAUTH_REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().min(3600).max(31_536_000).default(2_592_000),
 
   REDIS_URL: z.string().min(1).default("redis://127.0.0.1:6379"),
-  IMAGE_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).max(1000).default(5),
-  IMAGE_DAILY_LIMIT: z.coerce.number().int().min(1).max(100_000).default(100),
-  IMAGE_MAX_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(5),
+  IMAGE_MAX_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(10),
   IMAGE_RESULT_TTL_SECONDS: z.coerce.number().int().min(86_400).max(31_536_000).default(2_592_000),
   LOGIN_ATTEMPTS_PER_15_MINUTES: z.coerce.number().int().min(1).max(1000).default(10),
   REGISTRATIONS_PER_HOUR: z.coerce.number().int().min(1).max(10_000).default(200),

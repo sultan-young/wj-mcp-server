@@ -14,29 +14,11 @@ export class UsageLimitError extends Error {
 }
 
 export class UsageLimits {
-  private readonly minuteLimiter: RateLimiterRedis;
-  private readonly dailyLimiter: RateLimiterRedis;
   private readonly loginLimiter: RateLimiterRedis;
   private readonly registrationLimiter: RateLimiterRedis;
 
   constructor(client: RedisClient, config: AppConfig) {
     const storeClient = client as unknown as ConstructorParameters<typeof RateLimiterRedis>[0]["storeClient"];
-    this.minuteLimiter = new RateLimiterRedis({
-      storeClient,
-      useRedisPackage: true,
-      rejectIfRedisNotReady: true,
-      keyPrefix: "wj:mcp:limit:image:minute",
-      points: config.IMAGE_RATE_LIMIT_PER_MINUTE,
-      duration: 60,
-    });
-    this.dailyLimiter = new RateLimiterRedis({
-      storeClient,
-      useRedisPackage: true,
-      rejectIfRedisNotReady: true,
-      keyPrefix: "wj:mcp:limit:image:day",
-      points: config.IMAGE_DAILY_LIMIT,
-      duration: 86_400,
-    });
     this.loginLimiter = new RateLimiterRedis({
       storeClient,
       useRedisPackage: true,
@@ -55,16 +37,6 @@ export class UsageLimits {
       duration: 3600,
       blockDuration: 3600,
     });
-  }
-
-  async consumeImage(subject: string): Promise<void> {
-    try {
-      await Promise.all([this.minuteLimiter.consume(subject), this.dailyLimiter.consume(subject)]);
-    } catch (error) {
-      const result = getRateLimitResult(error);
-      const retryAfterSeconds = Math.max(1, Math.ceil((result.msBeforeNext ?? 60_000) / 1000));
-      throw new UsageLimitError(`WJ image limit reached. Try again in ${retryAfterSeconds} seconds.`, retryAfterSeconds);
-    }
   }
 
   async consumeLogin(ip: string): Promise<void> {
