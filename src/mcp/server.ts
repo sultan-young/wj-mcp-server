@@ -18,6 +18,8 @@ import {
 } from "../wj/types.js";
 
 export const IMAGE_WIDGET_URI = "ui://wj/image-result-v2.html";
+export const LEGACY_IMAGE_WIDGET_URIS = ["ui://wj/image-result.html"] as const;
+export const IMAGE_WIDGET_URIS = [IMAGE_WIDGET_URI, ...LEGACY_IMAGE_WIDGET_URIS] as const;
 export const WJ_IMAGE_SERVER_INSTRUCTIONS = `Use generate_image immediately when the user explicitly asks to use WJ, WJ image generation, or 无界生图. Use edit_image immediately when the user explicitly asks WJ to edit ChatGPT image attachments. Map the image being changed to target_image and style, text, layout, or identity references to reference_images; preserve attachment order for labels such as image one and image two. Do not ask for public image URLs when ChatGPT attachments are available. If a native ChatGPT image-generation attempt in the current conversation explicitly reports quota exhaustion, rate limiting, or temporary unavailability, call generate_image once without asking the user again. Default to gpt-image-2, 1K, and 1:1 unless the user specifies supported alternatives. Preserve the user's prompt and requested image settings when falling back. Do not claim to know the user's native ChatGPT image quota, do not force WJ for generic image requests when no native failure is visible, and do not claim an image was generated unless the tool returns at least one asset. After success, rely on the associated WJ image component to display the result.`;
 
 type McpServerDependencies = {
@@ -142,35 +144,38 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
     },
   );
 
-  registerAppResource(
-    server,
-    "WJ image result",
-    IMAGE_WIDGET_URI,
-    {
-      description: "Displays generated WJ images inline in the conversation.",
-      _meta: {
-        ui: {
-          prefersBorder: false,
-          csp: { resourceDomains: config.imageResourceDomains },
-        },
-      },
-    },
-    async () => ({
-      contents: [
-        {
-          uri: IMAGE_WIDGET_URI,
-          mimeType: RESOURCE_MIME_TYPE,
-          text: widgetHtml,
-          _meta: {
-            ui: {
-              prefersBorder: false,
-              csp: { resourceDomains: config.imageResourceDomains },
-            },
+  // Keep old resource URIs readable because installed ChatGPT connectors cache them.
+  for (const resourceUri of IMAGE_WIDGET_URIS) {
+    registerAppResource(
+      server,
+      `WJ image result (${resourceUri})`,
+      resourceUri,
+      {
+        description: "Displays generated WJ images inline in the conversation.",
+        _meta: {
+          ui: {
+            prefersBorder: false,
+            csp: { resourceDomains: config.imageResourceDomains },
           },
         },
-      ],
-    }),
-  );
+      },
+      async () => ({
+        contents: [
+          {
+            uri: resourceUri,
+            mimeType: RESOURCE_MIME_TYPE,
+            text: widgetHtml,
+            _meta: {
+              ui: {
+                prefersBorder: false,
+                csp: { resourceDomains: config.imageResourceDomains },
+              },
+            },
+          },
+        ],
+      }),
+    );
+  }
 
   return server;
 }

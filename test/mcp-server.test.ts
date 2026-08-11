@@ -3,7 +3,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { GenerationService } from "../src/generation-service.js";
-import { createWjMcpServer, IMAGE_WIDGET_URI, WJ_IMAGE_SERVER_INSTRUCTIONS } from "../src/mcp/server.js";
+import { createWjMcpServer, IMAGE_WIDGET_URI, IMAGE_WIDGET_URIS, WJ_IMAGE_SERVER_INSTRUCTIONS } from "../src/mcp/server.js";
 import { testConfig, testLogger } from "./helpers.js";
 
 describe("WJ MCP server", () => {
@@ -122,17 +122,23 @@ describe("WJ MCP server", () => {
       ],
     });
 
-    const resource = await client.readResource({ uri: IMAGE_WIDGET_URI });
-    expect(resource.contents[0]).toEqual(expect.objectContaining({
-      mimeType: "text/html;profile=mcp-app",
-      text: "<!doctype html><p>widget</p>",
-      _meta: expect.objectContaining({
-        ui: expect.objectContaining({
-          csp: expect.objectContaining({
-            resourceDomains: expect.arrayContaining(["https://img.downk.cc"]),
+    const resources = await client.listResources();
+    expect(resources.resources.map((resource) => resource.uri)).toEqual(expect.arrayContaining([...IMAGE_WIDGET_URIS]));
+
+    for (const uri of IMAGE_WIDGET_URIS) {
+      const resource = await client.readResource({ uri });
+      expect(resource.contents[0]).toEqual(expect.objectContaining({
+        uri,
+        mimeType: "text/html;profile=mcp-app",
+        text: "<!doctype html><p>widget</p>",
+        _meta: expect.objectContaining({
+          ui: expect.objectContaining({
+            csp: expect.objectContaining({
+              resourceDomains: expect.arrayContaining(["https://img.downk.cc"]),
+            }),
           }),
         }),
-      }),
-    }));
+      }));
+    }
   });
 });
