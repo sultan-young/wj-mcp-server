@@ -251,13 +251,31 @@ function verifyFormOrigin(config: AppConfig) {
   return (req: Request, res: Response, next: NextFunction) => {
     const origin = req.get("origin");
     const referer = req.get("referer");
-    const valid = origin === config.publicBaseUrl.origin || (!origin && referer?.startsWith(`${config.publicBaseUrl.origin}/`));
+    const fetchSite = req.get("sec-fetch-site");
+    let valid: boolean;
+    if (origin) {
+      valid = origin === config.publicBaseUrl.origin;
+    } else if (referer) {
+      valid = getUrlOrigin(referer) === config.publicBaseUrl.origin;
+    } else {
+      // Some OAuth browser surfaces omit both headers. The interaction cookie is
+      // SameSite=Lax, so still reject any request explicitly marked cross-site.
+      valid = fetchSite !== "cross-site";
+    }
     if (!valid) {
       res.status(403).send(renderErrorPage("请求来源校验失败。"));
       return;
     }
     next();
   };
+}
+
+function getUrlOrigin(value: string): string | undefined {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return undefined;
+  }
 }
 
 function safeEqual(value: string, expected: string): boolean {
@@ -319,7 +337,7 @@ function pageShell(title: string, body: string): string {
 function setAuthorizationPageHeaders(res: Response): void {
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
-  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Referrer-Policy", "same-origin");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
 }

@@ -51,8 +51,16 @@ describe("OAuth flow", () => {
     const initial = await agent.get(`/auth?${authorize.toString()}`).expect(303);
     const loginPage = await followLocalRedirects(agent, initial, config.publicBaseUrl);
     expect(loginPage.status).toBe(200);
+    expect(loginPage.headers["referrer-policy"]).toBe("same-origin");
     expect(loginPage.text).toContain("连接 WJ 生图");
     const interactionPath = new URL(loginPage.request.url, config.publicBaseUrl).pathname;
+
+    await agent
+      .post(`${interactionPath}/login`)
+      .set("origin", "https://attacker.example.com")
+      .type("form")
+      .send({ password: config.MCP_SHARED_PASSWORD })
+      .expect(403);
 
     await agent
       .post(`${interactionPath}/login`)
@@ -63,7 +71,6 @@ describe("OAuth flow", () => {
 
     const loggedIn = await agent
       .post(`${interactionPath}/login`)
-      .set("origin", config.publicBaseUrl.origin)
       .type("form")
       .send({ password: config.MCP_SHARED_PASSWORD })
       .expect(303);
