@@ -61,7 +61,7 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
     {
       title: "使用 WJ 生成图片",
       description:
-        "Generate and display one image through WJ. For multiple images, call this tool once per image and dispatch all independent calls concurrently rather than serially. Reuse the exact prompt for same-prompt variants. Default to gpt-image-2 and 2K. Each call consumes WJ quota.",
+        "Generate and display one image through WJ. For multiple images, call this tool once per image and dispatch all independent calls concurrently rather than serially. Reuse the exact prompt for same-prompt variants. Default to gpt-image-2 and 2K. After a successful call, prefer listing the original image URL in the final assistant response as a plain text link. Each call consumes WJ quota.",
       inputSchema: generateImageInputSchema,
       outputSchema: imageOutputSchema,
       annotations: {
@@ -111,7 +111,7 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
     {
       title: "使用 WJ 编辑图片",
       description:
-        "Edit and display one ChatGPT image attachment through WJ. Put the image being changed in target_image and optional style, text, layout, or identity references in reference_images. For multiple independent edits, call this tool once per output and dispatch all calls concurrently rather than serially. Each call consumes WJ image quota.",
+        "Edit and display one ChatGPT image attachment through WJ. Put the image being changed in target_image and optional style, text, layout, or identity references in reference_images. For multiple independent edits, call this tool once per output and dispatch all calls concurrently rather than serially. After a successful call, prefer listing the original image URL in the final assistant response as a plain text link. Each call consumes WJ image quota.",
       inputSchema: editImageInputSchema,
       outputSchema: imageOutputSchema,
       annotations: {

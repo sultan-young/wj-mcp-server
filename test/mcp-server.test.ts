@@ -43,7 +43,9 @@ describe("WJ MCP server", () => {
     expect(tool?.inputSchema).toEqual(expect.objectContaining({ type: "object" }));
     expect(tool?.inputSchema.properties).not.toHaveProperty("count");
     expect(tool?._meta?.securitySchemes).toEqual([{ type: "oauth2", scopes: ["wj:image"] }]);
+    expect(tool?.description).toContain("prefer listing the original image URL");
     expect(editTool?._meta?.["ui/resourceUri"]).toBe(IMAGE_WIDGET_URI);
+    expect(editTool?.description).toContain("prefer listing the original image URL");
     expect(editTool?._meta?.["openai/fileParams"]).toEqual(["target_image", "reference_images"]);
     expect(editTool?.inputSchema).toEqual(expect.objectContaining({
       type: "object",
