@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WJ 生成图片</title>
+  </head>
+  <body>
+    <main id="app" aria-live="polite">
+      <div id="loading" class="loading">
+        <div class="skeleton"></div>
+        <span>WJ 正在准备图片</span>
+      </div>
+      <div id="error" class="error" hidden>图片结果暂时无法显示，请使用消息中的原图链接。</div>
+      <section id="result" hidden>
+        <div id="gallery" class="gallery"></div>
+        <footer>
+          <div class="meta">
+            <strong id="model">WJ</strong>
+            <span id="details"></span>
+          </div>
+          <div class="actions">
+            <button id="download" type="button" title="下载第一张图片" aria-label="下载第一张图片">
+              <i data-lucide="download"></i>
+            </button>
+            <button id="open" type="button" title="打开第一张原图" aria-label="打开第一张原图">
+              <i data-lucide="external-link"></i>
+            </button>
+          </div>
+        </footer>
+      </section>
+    </main>
+    <script type="module" src="/image-result.ts"></script>
+  </body>
+</html>
