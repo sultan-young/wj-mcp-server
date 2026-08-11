@@ -2,6 +2,7 @@ import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@model
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+import { WJ_IMAGE_SCOPE } from "../auth/provider.js";
 import type { AppConfig } from "../config.js";
 import type { GenerationService } from "../generation-service.js";
 import { UsageLimitError } from "../limits.js";
@@ -49,6 +50,7 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
       },
       _meta: {
         ui: { resourceUri: IMAGE_WIDGET_URI, visibility: ["model"] },
+        securitySchemes: [{ type: "oauth2", scopes: [WJ_IMAGE_SCOPE] }],
         "openai/toolInvocation/invoking": "WJ 正在生成图片",
         "openai/toolInvocation/invoked": "WJ 图片已生成",
       },

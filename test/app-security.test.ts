@@ -26,7 +26,17 @@ describe("HTTP security and discovery", () => {
       .set("host", "127.0.0.1")
       .send({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} })
       .expect(401);
-    expect(unauthorized.headers["www-authenticate"]).toContain("resource_metadata=\"http://127.0.0.1:6070/.well-known/oauth-protected-resource/mcp\"");
+    expect(unauthorized.headers["www-authenticate"]).toContain("resource_metadata=\"http://127.0.0.1:6070/.well-known/oauth-protected-resource\"");
+
+    const rootProtectedMetadata = await request(app)
+      .get("/.well-known/oauth-protected-resource")
+      .set("host", "127.0.0.1")
+      .expect(200);
+    expect(rootProtectedMetadata.body).toEqual(expect.objectContaining({
+      resource: "http://127.0.0.1:6070/mcp",
+      authorization_servers: ["http://127.0.0.1:6070"],
+      scopes_supported: ["wj:image"],
+    }));
 
     const protectedMetadata = await request(app)
       .get("/.well-known/oauth-protected-resource/mcp")

@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 
-import { getOAuthProtectedResourceMetadataUrl, mcpAuthMetadataRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import { mcpAuthMetadataRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -55,6 +55,18 @@ export async function createApplication(dependencies: AppDependencies) {
     res.status(200).json({ status: "ready" });
   }));
 
+  const protectedResourceMetadataUrl = new URL("/.well-known/oauth-protected-resource", config.publicBaseUrl);
+  app.get(protectedResourceMetadataUrl.pathname, (_req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.status(200).json({
+      resource: config.mcpUrl.href,
+      authorization_servers: [config.publicBaseUrl.origin],
+      scopes_supported: [WJ_IMAGE_SCOPE],
+      resource_name: "WJ Image Generation",
+      resource_documentation: new URL("/", config.publicBaseUrl).href,
+    });
+  });
+
   app.use(mcpAuthMetadataRouter({
     oauthMetadata: auth.oauthMetadata,
     resourceServerUrl: config.mcpUrl,
@@ -79,7 +91,7 @@ export async function createApplication(dependencies: AppDependencies) {
   const authenticate = requireBearerAuth({
     verifier: auth.verifier,
     requiredScopes: [WJ_IMAGE_SCOPE],
-    resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(config.mcpUrl),
+    resourceMetadataUrl: protectedResourceMetadataUrl.href,
   });
   const mcpBody = express.json({ limit: "1mb" });
 

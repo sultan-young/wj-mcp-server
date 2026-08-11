@@ -31,6 +31,7 @@ describe("WJ MCP server", () => {
     const tool = tools.tools.find((item) => item.name === "generate_image");
     expect(tool?._meta?.["ui/resourceUri"]).toBe(IMAGE_WIDGET_URI);
     expect(tool?.inputSchema).toEqual(expect.objectContaining({ type: "object" }));
+    expect(tool?._meta?.securitySchemes).toEqual([{ type: "oauth2", scopes: ["wj:image"] }]);
 
     const response = await client.callTool({
       name: "generate_image",
