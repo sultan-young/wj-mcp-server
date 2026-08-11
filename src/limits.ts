@@ -23,18 +23,24 @@ export class UsageLimits {
     const storeClient = client as unknown as ConstructorParameters<typeof RateLimiterRedis>[0]["storeClient"];
     this.minuteLimiter = new RateLimiterRedis({
       storeClient,
+      useRedisPackage: true,
+      rejectIfRedisNotReady: true,
       keyPrefix: "wj:mcp:limit:image:minute",
       points: config.IMAGE_RATE_LIMIT_PER_MINUTE,
       duration: 60,
     });
     this.dailyLimiter = new RateLimiterRedis({
       storeClient,
+      useRedisPackage: true,
+      rejectIfRedisNotReady: true,
       keyPrefix: "wj:mcp:limit:image:day",
       points: config.IMAGE_DAILY_LIMIT,
       duration: 86_400,
     });
     this.loginLimiter = new RateLimiterRedis({
       storeClient,
+      useRedisPackage: true,
+      rejectIfRedisNotReady: true,
       keyPrefix: "wj:mcp:limit:login",
       points: config.LOGIN_ATTEMPTS_PER_15_MINUTES,
       duration: 900,
@@ -42,6 +48,8 @@ export class UsageLimits {
     });
     this.registrationLimiter = new RateLimiterRedis({
       storeClient,
+      useRedisPackage: true,
+      rejectIfRedisNotReady: true,
       keyPrefix: "wj:mcp:limit:registration",
       points: config.REGISTRATIONS_PER_HOUR,
       duration: 3600,
@@ -53,7 +61,7 @@ export class UsageLimits {
     try {
       await Promise.all([this.minuteLimiter.consume(subject), this.dailyLimiter.consume(subject)]);
     } catch (error) {
-      const result = error as RateLimiterRes;
+      const result = getRateLimitResult(error);
       const retryAfterSeconds = Math.max(1, Math.ceil((result.msBeforeNext ?? 60_000) / 1000));
       throw new UsageLimitError(`WJ image limit reached. Try again in ${retryAfterSeconds} seconds.`, retryAfterSeconds);
     }
@@ -63,7 +71,7 @@ export class UsageLimits {
     try {
       await this.loginLimiter.consume(ip);
     } catch (error) {
-      const result = error as RateLimiterRes;
+      const result = getRateLimitResult(error);
       const retryAfterSeconds = Math.max(1, Math.ceil((result.msBeforeNext ?? 900_000) / 1000));
       throw new UsageLimitError("Too many authorization attempts. Try again later.", retryAfterSeconds);
     }
@@ -77,9 +85,17 @@ export class UsageLimits {
     try {
       await this.registrationLimiter.consume(ip);
     } catch (error) {
-      const result = error as RateLimiterRes;
+      const result = getRateLimitResult(error);
       const retryAfterSeconds = Math.max(1, Math.ceil((result.msBeforeNext ?? 3_600_000) / 1000));
       throw new UsageLimitError("Too many OAuth client registrations. Try again later.", retryAfterSeconds);
     }
   }
+}
+
+function getRateLimitResult(error: unknown): RateLimiterRes {
+  if (error instanceof Error) throw error;
+  if (typeof error !== "object" || error === null || typeof (error as RateLimiterRes).msBeforeNext !== "number") {
+    throw error;
+  }
+  return error as RateLimiterRes;
 }
