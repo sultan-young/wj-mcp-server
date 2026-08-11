@@ -41,7 +41,7 @@ const envSchema = z.object({
   IMAGE_DAILY_LIMIT: z.coerce.number().int().min(1).max(100_000).default(100),
   IMAGE_MAX_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(2),
   LOGIN_ATTEMPTS_PER_15_MINUTES: z.coerce.number().int().min(1).max(1000).default(10),
-  REGISTRATIONS_PER_HOUR: z.coerce.number().int().min(1).max(10_000).default(20),
+  REGISTRATIONS_PER_HOUR: z.coerce.number().int().min(1).max(10_000).default(200),
   IMAGE_RESOURCE_DOMAINS: csv.default(["https://img.downk.cc"]),
 });
 

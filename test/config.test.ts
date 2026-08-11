@@ -8,6 +8,7 @@ describe("loadConfig", () => {
     const config = testConfig();
     expect(config.mcpUrl.href).toBe("http://127.0.0.1:6070/mcp");
     expect(config.WJ_DEFAULT_MODEL).toBe("gpt-image-2");
+    expect(config.REGISTRATIONS_PER_HOUR).toBe(200);
     expect(config.imageResourceDomains).toContain("https://wj.example.com");
   });
 
