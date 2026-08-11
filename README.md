@@ -5,7 +5,11 @@
 ## 已实现
 
 - 标准 MCP Streamable HTTP 端点：`POST /mcp`
-- `generate_image` 工具，默认模型 `gpt-image-2`
+- `generate_image` 工具，默认模型 `gpt-image-2`、默认分辨率 `2K`
+- 同一提示词可通过 `count` 一次并发生成 1 至 8 个变体
+- 不同提示词可通过 `generate_images.requests` 一次提交 2 至 8 个任务，由服务端并发执行
+- 每次成功结果保存到 Redis 30 天，并可通过 `get_image_result(resultId)` 无额度恢复
+- 工具文本同时返回原图链接，Widget 不可用时仍能打开结果
 - 支持 `nano-banana-2`、常用宽高比、`1K/2K/4K` 和参考图 URL
 - MCP Apps 图片组件，在支持的 ChatGPT 客户端中直接显示图片
 - 不支持组件的客户端仍会收到 Markdown 图片和原图链接
@@ -92,6 +96,10 @@ curl https://mcp.wj.zaowuwujie.ltd/.well-known/oauth-protected-resource/mcp
 每个互不关联的 ChatGPT 账号都重复一次连接即可。成员不需要也不应拿到 `WJ_API_KEY`。只知道 MCP URL 的人会收到 `401`，没有共享口令无法取得访问令牌或调用生图。
 
 推荐使用规则见 `docs/chatgpt-instructions.md`。显式说“使用 WJ 生图”可以稳定触发；ChatGPT 内置生图限流后的回退取决于平台是否把失败暴露给模型，MCP 服务本身无法读取账号内部额度。
+
+同一提示词生成多张时，让 ChatGPT 调用一次 `generate_image` 并设置 `count`。不同提示词生成多张时，让 ChatGPT 调用一次 `generate_images` 并把每个任务放入 `requests`。后者由 MCP 服务端保证并发，不依赖 ChatGPT 是否会并行调度多次工具调用。实际同时请求 WJ 的数量由 `IMAGE_MAX_CONCURRENCY` 控制，每张图片仍分别计入分钟和每日额度。
+
+每次成功调用都会返回 `resultId`、`expiresAt` 和原图链接。结果默认在 Redis 中保存 30 天；如果 ChatGPT 的图片组件没有显示，应调用 `get_image_result` 恢复或直接使用原图链接，不要重新生成。恢复操作不会请求 WJ，也不会消耗图片额度。
 
 ## 运维与安全
 

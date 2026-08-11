@@ -5,13 +5,13 @@ import { APP_VERSION } from "../src/version.js";
 import {
   createPersistedImageState,
   getImageResult,
-  isImageResult,
   type ImageResult,
 } from "./image-result-state.js";
 import "./styles.css";
 
 type OpenAiBridge = {
   toolOutput?: unknown;
+  toolResponseMetadata?: unknown;
   widgetState?: unknown;
   setWidgetState?: (state: unknown) => void;
 };
@@ -36,11 +36,12 @@ let current: ImageResult | undefined;
 createIcons({ icons: { Download, ExternalLink } });
 
 app.addEventListener("toolresult", (params) => {
-  if (params.isError || !isImageResult(params.structuredContent)) {
+  const imageResult = getImageResult(params);
+  if (params.isError || !imageResult) {
     if (!current) showResultUnavailable();
     return;
   }
-  render(params.structuredContent, true);
+  render(imageResult, true);
 });
 
 app.onhostcontextchanged = applyHostContext;
@@ -68,10 +69,20 @@ downloadButton.addEventListener("click", async () => {
 
 await app.connect();
 applyHostContext(app.getHostContext());
+restoreFromOpenAiGlobals(window.openai);
 
-const restoredResult = getImageResult(window.openai?.toolOutput)
-  ?? getImageResult(window.openai?.widgetState);
-if (!current && restoredResult) render(restoredResult, false);
+window.addEventListener("openai:set_globals", (event) => {
+  const globals = (event as CustomEvent<{ globals?: OpenAiBridge }>).detail?.globals;
+  restoreFromOpenAiGlobals(globals ?? window.openai);
+});
+
+function restoreFromOpenAiGlobals(bridge: OpenAiBridge | undefined): void {
+  if (current || !bridge) return;
+  const restoredResult = getImageResult(bridge.toolOutput)
+    ?? getImageResult(bridge.toolResponseMetadata)
+    ?? getImageResult(bridge.widgetState);
+  if (restoredResult) render(restoredResult, false);
+}
 
 function render(data: ImageResult, persist: boolean): void {
   current = data;

@@ -13,6 +13,7 @@ import type { HttpLogger, Options as PinoHttpOptions } from "pino-http";
 import { createAuthServices, WJ_IMAGE_SCOPE } from "./auth/provider.js";
 import type { AppConfig } from "./config.js";
 import { GenerationService } from "./generation-service.js";
+import { ImageResultStore } from "./image-result-store.js";
 import { UsageLimitError, UsageLimits } from "./limits.js";
 import type { AppLogger } from "./logger.js";
 import { createWjMcpServer } from "./mcp/server.js";
@@ -36,6 +37,7 @@ export async function createApplication(dependencies: AppDependencies) {
   const limits = new UsageLimits(redis, config);
   const wjClient = new WjClient(config, logger, dependencies.fetchImpl);
   const generation = new GenerationService(wjClient, limits, config);
+  const imageResults = new ImageResultStore(redis, config.IMAGE_RESULT_TTL_SECONDS);
   const auth = createAuthServices(config, redis, limits, logger);
   const app = createMcpExpressApp({ host: config.HOST, allowedHosts: config.ALLOWED_HOSTS });
 
@@ -96,7 +98,7 @@ export async function createApplication(dependencies: AppDependencies) {
   const mcpBody = express.json({ limit: "1mb" });
 
   app.post("/mcp", authenticate, mcpBody, asyncHandler(async (req, res) => {
-    const mcpServer = createWjMcpServer({ config, generation, logger, widgetHtml });
+    const mcpServer = createWjMcpServer({ config, generation, imageResults, logger, widgetHtml });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on("close", () => void transport.close());
     await mcpServer.connect(transport);

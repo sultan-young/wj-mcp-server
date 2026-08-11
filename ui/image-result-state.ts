@@ -11,6 +11,12 @@ export type ImageResult = {
   aspectRatio?: string;
   durationMs?: number;
   assets: ImageAsset[];
+  requestedCount?: number;
+  completedCount?: number;
+  failedCount?: number;
+  resultId?: string;
+  createdAt?: string;
+  expiresAt?: string;
 };
 
 type PersistedImageState = {
@@ -19,19 +25,35 @@ type PersistedImageState = {
 };
 
 export function getImageResult(value: unknown): ImageResult | undefined {
-  if (isImageResult(value)) return value;
-  if (!value || typeof value !== "object") return undefined;
+  const queue: unknown[] = [value];
+  const visited = new Set<object>();
 
-  const privateContent = (value as { privateContent?: unknown }).privateContent;
-  if (!privateContent || typeof privateContent !== "object") return undefined;
+  while (queue.length > 0 && visited.size < 24) {
+    const candidate = queue.shift();
+    if (isImageResult(candidate)) return candidate;
+    if (!candidate || typeof candidate !== "object" || visited.has(candidate)) continue;
 
-  const state = privateContent as Partial<PersistedImageState>;
-  return state.version === 1 && isImageResult(state.imageResult) ? state.imageResult : undefined;
+    visited.add(candidate);
+    const record = candidate as Record<string, unknown>;
+    for (const key of [
+      "structuredContent",
+      "privateContent",
+      "imageResult",
+      "mcp_tool_result",
+      "call_tool_result",
+      "toolOutput",
+      "toolResponseMetadata",
+    ]) {
+      if (record[key] !== undefined) queue.push(record[key]);
+    }
+  }
+
+  return undefined;
 }
 
 export function createPersistedImageState(imageResult: ImageResult) {
   return {
-    modelContent: `WJ image result: ${imageResult.model}, ${imageResult.assets.length} asset(s).`,
+    modelContent: `WJ image result${imageResult.resultId ? ` ${imageResult.resultId}` : ""}: ${imageResult.model}, ${imageResult.assets.length} asset(s).`,
     privateContent: {
       version: 1 as const,
       imageResult,

@@ -1,7 +1,7 @@
 import type { AppConfig } from "../config.js";
 import type { AppLogger } from "../logger.js";
 import { APP_VERSION } from "../version.js";
-import { type GenerateImageInput, type WjImageData, wjImageResponseSchema } from "./types.js";
+import { type GenerateImageRequest, type WjImageData, wjImageResponseSchema } from "./types.js";
 
 export class WjApiError extends Error {
   constructor(
@@ -20,7 +20,7 @@ export class WjClient {
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
-  async generateImage(input: GenerateImageInput): Promise<WjImageData> {
+  async generateImage(input: GenerateImageRequest): Promise<WjImageData> {
     if (!this.config.WJ_ALLOWED_MODELS.includes(input.model)) {
       throw new WjApiError(`Model ${input.model} is not allowed`);
     }

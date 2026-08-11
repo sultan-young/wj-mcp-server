@@ -18,6 +18,18 @@ describe("image result state", () => {
     expect(getImageResult(createPersistedImageState(imageResult))).toEqual(imageResult);
   });
 
+  it("reads the standard tool-result envelope", () => {
+    expect(getImageResult({ structuredContent: imageResult })).toEqual(imageResult);
+  });
+
+  it("reads ChatGPT full response metadata fallbacks", () => {
+    expect(getImageResult({
+      mcp_tool_result: {
+        structuredContent: imageResult,
+      },
+    })).toEqual(imageResult);
+  });
+
   it("rejects incomplete persisted data", () => {
     expect(getImageResult({ privateContent: { version: 1 } })).toBeUndefined();
   });

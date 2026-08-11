@@ -16,7 +16,7 @@ export const openAIFileSchema = z
   })
   .strict();
 
-export const generateImageInputSchema = z.object({
+export const generateImageRequestSchema = z.object({
   prompt: z.string().trim().min(1).max(8_000).describe("A detailed prompt describing the image to generate."),
   model: imageModelSchema.default("gpt-image-2").describe("Use gpt-image-2 unless the user explicitly requests another model."),
   aspect_ratio: aspectRatioSchema.default("1:1").describe("Output image aspect ratio."),
@@ -26,6 +26,24 @@ export const generateImageInputSchema = z.object({
     .max(4)
     .optional()
     .describe("Optional public HTTPS reference images for image-to-image generation."),
+});
+
+export const generateImageInputSchema = generateImageRequestSchema.extend({
+  count: z
+    .number()
+    .int()
+    .min(1)
+    .max(8)
+    .optional()
+    .describe("Number of images to generate with this exact prompt. Default to 1. Use one call with count greater than 1 for same-prompt variants."),
+});
+
+export const generateImagesInputSchema = z.object({
+  requests: z
+    .array(generateImageRequestSchema)
+    .min(2)
+    .max(8)
+    .describe("Two to eight distinct image requests. Put every different prompt here so WJ can generate them concurrently in one tool call."),
 });
 
 export const editImageInputSchema = z.object({
@@ -67,6 +85,8 @@ export const wjImageResponseSchema = z.object({
 });
 
 export type GenerateImageInput = z.infer<typeof generateImageInputSchema>;
+export type GenerateImageRequest = z.infer<typeof generateImageRequestSchema>;
+export type GenerateImagesInput = z.infer<typeof generateImagesInputSchema>;
 export type EditImageInput = z.infer<typeof editImageInputSchema>;
 export type ImageAsset = z.infer<typeof imageAssetSchema>;
 export type WjImageData = z.infer<typeof wjImageDataSchema>;

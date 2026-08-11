@@ -1,5 +1,7 @@
 import { loadConfig, type AppConfig } from "../src/config.js";
+import { ImageResultStore } from "../src/image-result-store.js";
 import { createLogger } from "../src/logger.js";
+import type { RedisClient } from "../src/redis.js";
 
 export function testConfig(overrides: NodeJS.ProcessEnv = {}): AppConfig {
   return loadConfig({
@@ -28,4 +30,16 @@ export function testConfig(overrides: NodeJS.ProcessEnv = {}): AppConfig {
 
 export function testLogger() {
   return createLogger({ LOG_LEVEL: "silent" });
+}
+
+export function testImageResultStore(ttlSeconds = 2_592_000): ImageResultStore {
+  const records = new Map<string, string>();
+  const redis = {
+    set: async (key: string, value: string) => {
+      records.set(key, value);
+      return "OK";
+    },
+    get: async (key: string) => records.get(key) ?? null,
+  } as unknown as RedisClient;
+  return new ImageResultStore(redis, ttlSeconds);
 }
