@@ -7,6 +7,7 @@ import type { AppConfig } from "../config.js";
 import type { GenerationService } from "../generation-service.js";
 import { UsageLimitError } from "../limits.js";
 import type { AppLogger } from "../logger.js";
+import { APP_VERSION } from "../version.js";
 import { WjApiError } from "../wj/client.js";
 import {
   aspectRatioSchema,
@@ -30,7 +31,7 @@ type McpServerDependencies = {
 export function createWjMcpServer(dependencies: McpServerDependencies): McpServer {
   const { config, generation, logger, widgetHtml } = dependencies;
   const server = new McpServer(
-    { name: "wj-mcp-server", version: "0.1.0" },
+    { name: "wj-mcp-server", version: APP_VERSION },
     {
       capabilities: { tools: {}, resources: {} },
       instructions: WJ_IMAGE_SERVER_INSTRUCTIONS,
@@ -151,6 +152,7 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
       _meta: {
         ui: {
           prefersBorder: false,
+          domain: config.publicBaseUrl.origin,
           csp: { resourceDomains: config.imageResourceDomains },
         },
       },
@@ -164,6 +166,7 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
           _meta: {
             ui: {
               prefersBorder: false,
+              domain: config.publicBaseUrl.origin,
               csp: { resourceDomains: config.imageResourceDomains },
             },
           },

@@ -29,6 +29,7 @@ describe("WjClient", () => {
     const [url, init] = fetchMock.mock.calls[0] ?? [];
     expect(String(url)).toBe("https://wj.example.com/api/v1/proxy/ai/generate/image");
     expect(new Headers(init?.headers).get("authorization")).toBe("Bearer wj_test_secret");
+    expect(new Headers(init?.headers).get("user-agent")).toBe("wj-mcp-server/0.1.2");
     expect(JSON.parse(String(init?.body))).toEqual({
       model: "gpt-image-2",
       prompt: "A red paper lantern in rain",

@@ -137,6 +137,11 @@ describe("WJ MCP server", () => {
 
     const resources = await client.listResources();
     expect(resources.resources.map((resource) => resource.uri)).toEqual([IMAGE_WIDGET_URI]);
+    expect(resources.resources[0]?._meta).toEqual(expect.objectContaining({
+      ui: expect.objectContaining({
+        domain: "http://127.0.0.1:6070",
+      }),
+    }));
 
     const resource = await client.readResource({ uri: IMAGE_WIDGET_URI });
     expect(resource.contents[0]).toEqual(expect.objectContaining({
@@ -145,6 +150,7 @@ describe("WJ MCP server", () => {
       text: "<!doctype html><p>widget</p>",
       _meta: expect.objectContaining({
         ui: expect.objectContaining({
+          domain: "http://127.0.0.1:6070",
           csp: expect.objectContaining({
             resourceDomains: expect.arrayContaining(["https://img.downk.cc"]),
           }),

@@ -1,5 +1,6 @@
 import type { AppConfig } from "../config.js";
 import type { AppLogger } from "../logger.js";
+import { APP_VERSION } from "../version.js";
 import { type GenerateImageInput, type WjImageData, wjImageResponseSchema } from "./types.js";
 
 export class WjApiError extends Error {
@@ -45,7 +46,7 @@ export class WjClient {
           authorization: `Bearer ${this.config.WJ_API_KEY}`,
           "content-type": "application/json",
           accept: "application/json",
-          "user-agent": "wj-mcp-server/0.1.0",
+          "user-agent": `wj-mcp-server/${APP_VERSION}`,
         },
         body: JSON.stringify(requestBody),
         signal: AbortSignal.timeout(this.config.WJ_REQUEST_TIMEOUT_MS),
