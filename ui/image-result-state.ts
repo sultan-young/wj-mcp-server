@@ -11,9 +11,6 @@ export type ImageResult = {
   aspectRatio?: string;
   durationMs?: number;
   assets: ImageAsset[];
-  requestedCount?: number;
-  completedCount?: number;
-  failedCount?: number;
   resultId?: string;
   createdAt?: string;
   expiresAt?: string;
@@ -35,6 +32,33 @@ export function getImageResult(value: unknown): ImageResult | undefined {
 
     visited.add(candidate);
     const record = candidate as Record<string, unknown>;
+    for (const key of [
+      "structuredContent",
+      "privateContent",
+      "imageResult",
+      "mcp_tool_result",
+      "call_tool_result",
+      "toolOutput",
+      "toolResponseMetadata",
+    ]) {
+      if (record[key] !== undefined) queue.push(record[key]);
+    }
+  }
+
+  return undefined;
+}
+
+export function getImageResultId(value: unknown): string | undefined {
+  const queue: unknown[] = [value];
+  const visited = new Set<object>();
+
+  while (queue.length > 0 && visited.size < 24) {
+    const candidate = queue.shift();
+    if (!candidate || typeof candidate !== "object" || visited.has(candidate)) continue;
+
+    visited.add(candidate);
+    const record = candidate as Record<string, unknown>;
+    if (typeof record.resultId === "string" && record.resultId.length > 0) return record.resultId;
     for (const key of [
       "structuredContent",
       "privateContent",

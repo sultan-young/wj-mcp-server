@@ -3,14 +3,14 @@ import { describe, expect, it, vi } from "vitest";
 import { GenerationService } from "../src/generation-service.js";
 import type { UsageLimits } from "../src/limits.js";
 import type { WjClient } from "../src/wj/client.js";
-import type { GenerateImageRequest } from "../src/wj/types.js";
+import type { GenerateImageInput } from "../src/wj/types.js";
 import { testConfig } from "./helpers.js";
 
 describe("GenerationService", () => {
   it("runs independent image requests concurrently up to the configured limit", async () => {
     let active = 0;
     let maximumActive = 0;
-    const generateImage = vi.fn(async (input: GenerateImageRequest) => {
+    const generateImage = vi.fn(async (input: GenerateImageInput) => {
       active += 1;
       maximumActive = Math.max(maximumActive, active);
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -32,7 +32,7 @@ describe("GenerationService", () => {
       { consumeImage } as unknown as UsageLimits,
       testConfig({ IMAGE_MAX_CONCURRENCY: "2" }),
     );
-    const request = (index: number): GenerateImageRequest => ({
+    const request = (index: number): GenerateImageInput => ({
       prompt: `image-${index}`,
       model: "gpt-image-2",
       aspect_ratio: "1:1",

@@ -5,7 +5,7 @@ description: Generate, edit, and display images with the WJ MCP tools. Use when 
 
 # WJ Image Generation
 
-Use the WJ plugin's `generate_image`, `generate_images`, and `edit_image` tools for explicit WJ requests and visible native-image fallback conditions.
+Use the WJ plugin's `generate_image` and `edit_image` tools for image creation, and `get_image_result` only to recover an existing completed result.
 
 ## Route the request
 
@@ -24,16 +24,18 @@ Use the WJ plugin's `generate_image`, `generate_images`, and `edit_image` tools 
 4. Pass reference image URLs through `reference_image_urls` when provided.
 5. For ChatGPT attachments, put the image being changed in `target_image` and style, text, layout, or identity references in `reference_images`.
 6. Preserve attachment order for labels such as image one and image two. Do not ask for public URLs when ChatGPT file parameters are available.
-7. For multiple variants of the same prompt, call `generate_image` once and set `count` to the requested number.
-8. For multiple different prompts, call `generate_images` once with every prompt in `requests`; this lets the WJ server execute them concurrently.
-9. Do not serialize repeated `generate_image` calls when the requests are independent. If separate calls are necessary, issue them in parallel with `count: 1`.
+7. Each `generate_image` call creates exactly one image. For multiple requested images, make one independent `generate_image` call per image.
+8. Dispatch all independent `generate_image` calls concurrently in the same tool-call turn. Never wait for one image to finish before starting the next.
+9. For same-prompt variants, reuse the exact prompt in every concurrent call. For different images, preserve each requested prompt in its own concurrent call.
+10. Apply the same concurrent-call rule to multiple independent `edit_image` outputs.
 
 ## Handle results
 
 1. Treat generation as successful only when the tool returns at least one asset.
 2. Let the associated WJ MCP image component display successful results; do not replace it with a fabricated attachment.
 3. Identify the result as generated through WJ.
-4. If the component does not display but the tool returned assets or a `resultId`, use the fallback original-image links or call `get_image_result`. Never regenerate solely because the component failed to display.
-5. WJ results remain recoverable by `resultId` for 30 days. `get_image_result` is read-only and does not consume WJ image quota.
-6. Retry the same request at most once for a transient timeout or `502`-class upstream failure.
-7. Do not retry authentication, authorization, WJ quota, or WJ rate-limit failures. Report the actionable error clearly.
+4. If an image component does not display and a `resultId` is available, call `get_image_result` before doing anything else. Never regenerate solely because the component failed to display.
+5. `get_image_result` is a read-only recovery tool: it retrieves the completed result, mounts the image component again, and consumes no WJ image quota.
+6. If recovery is unavailable or the result has expired, use the fallback original-image links and explain the limitation without regenerating automatically.
+7. Retry the same request at most once for a transient timeout or `502`-class upstream failure.
+8. Do not retry authentication, authorization, WJ quota, or WJ rate-limit failures. Report the actionable error clearly.

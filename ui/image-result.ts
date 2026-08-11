@@ -5,6 +5,7 @@ import { APP_VERSION } from "../src/version.js";
 import {
   createPersistedImageState,
   getImageResult,
+  getImageResultId,
   type ImageResult,
 } from "./image-result-state.js";
 import "./styles.css";
@@ -32,13 +33,15 @@ const details = requiredElement<HTMLSpanElement>("details");
 const openButton = requiredElement<HTMLButtonElement>("open");
 const downloadButton = requiredElement<HTMLButtonElement>("download");
 let current: ImageResult | undefined;
+let recoveryInFlight: Promise<void> | undefined;
 
 createIcons({ icons: { Download, ExternalLink } });
 
 app.addEventListener("toolresult", (params) => {
   const imageResult = getImageResult(params);
   if (params.isError || !imageResult) {
-    if (!current) showResultUnavailable();
+    if (!current && !params.isError) void recoverFromResultId(getImageResultId(params));
+    else if (!current) showResultUnavailable();
     return;
   }
   render(imageResult, true);
@@ -78,10 +81,30 @@ window.addEventListener("openai:set_globals", (event) => {
 
 function restoreFromOpenAiGlobals(bridge: OpenAiBridge | undefined): void {
   if (current || !bridge) return;
-  const restoredResult = getImageResult(bridge.toolOutput)
-    ?? getImageResult(bridge.toolResponseMetadata)
-    ?? getImageResult(bridge.widgetState);
+  const sources = [bridge.toolOutput, bridge.toolResponseMetadata, bridge.widgetState];
+  const restoredResult = sources.map(getImageResult).find(Boolean);
   if (restoredResult) render(restoredResult, false);
+  else void recoverFromResultId(sources.map(getImageResultId).find(Boolean));
+}
+
+async function recoverFromResultId(resultId: string | undefined): Promise<void> {
+  if (!resultId || current || recoveryInFlight) return;
+  recoveryInFlight = (async () => {
+    try {
+      const restored = await app.callServerTool({
+        name: "get_image_result",
+        arguments: { result_id: resultId },
+      });
+      const imageResult = getImageResult(restored);
+      if (imageResult) render(imageResult, true);
+      else showResultUnavailable();
+    } catch {
+      showResultUnavailable();
+    } finally {
+      recoveryInFlight = undefined;
+    }
+  })();
+  await recoveryInFlight;
 }
 
 function render(data: ImageResult, persist: boolean): void {

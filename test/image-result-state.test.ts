@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createPersistedImageState, getImageResult } from "../ui/image-result-state.js";
+import { createPersistedImageState, getImageResult, getImageResultId } from "../ui/image-result-state.js";
 
 const imageResult = {
   model: "gpt-image-2",
@@ -28,6 +28,14 @@ describe("image result state", () => {
         structuredContent: imageResult,
       },
     })).toEqual(imageResult);
+  });
+
+  it("extracts a result id when the host omits the full image payload", () => {
+    expect(getImageResultId({
+      toolResponseMetadata: {
+        structuredContent: { resultId: "wj_img_recoverable" },
+      },
+    })).toBe("wj_img_recoverable");
   });
 
   it("rejects incomplete persisted data", () => {
