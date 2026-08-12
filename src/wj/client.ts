@@ -1,7 +1,17 @@
 import type { AppConfig } from "../config.js";
 import type { AppLogger } from "../logger.js";
 import { APP_VERSION } from "../version.js";
+import {
+  type CalculateProfitToolInput,
+  type ProfitCalculationData,
+  profitCalculationDataSchema,
+  type SavedProfitRecord,
+  savedProfitRecordSchema,
+  type SaveProfitToolInput,
+  toProfitApiInput,
+} from "./profit-types.js";
 import { type GenerateImageInput, type WjImageData, wjImageResponseSchema } from "./types.js";
+import { z } from "zod";
 
 export class WjApiError extends Error {
   constructor(
@@ -91,6 +101,72 @@ export class WjClient {
       "WJ image generated",
     );
     return parsed.data.data;
+  }
+
+  async calculateProfit(input: CalculateProfitToolInput): Promise<ProfitCalculationData> {
+    return await this.postWjData(
+      "/api/v1/commonTools/profitCalculator/calculate",
+      toProfitApiInput(input),
+      profitCalculationDataSchema,
+      "profit calculation",
+    );
+  }
+
+  async saveProfitCalculation(input: SaveProfitToolInput): Promise<SavedProfitRecord> {
+    return await this.postWjData(
+      "/api/v1/commonTools/profitCalculator/sku/upsert",
+      toProfitApiInput(input),
+      savedProfitRecordSchema,
+      "profit calculation recording",
+    );
+  }
+
+  private async postWjData<T>(path: string, body: unknown, dataSchema: z.ZodType<T>, operation: string): Promise<T> {
+    const endpoint = new URL(path, this.config.wjApiBaseUrl);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(endpoint, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${this.config.WJ_API_KEY}`,
+          "content-type": "application/json",
+          accept: "application/json",
+          "user-agent": `wj-mcp-server/${APP_VERSION}`,
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(this.config.WJ_REQUEST_TIMEOUT_MS),
+      });
+    } catch (error) {
+      const isTimeout = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+      throw new WjApiError(isTimeout ? `WJ ${operation} timed out` : `Unable to reach WJ for ${operation}`);
+    }
+
+    const rawBody = await response.text();
+    let json: unknown;
+    try {
+      json = JSON.parse(rawBody);
+    } catch {
+      throw new WjApiError(`WJ returned a non-JSON response for ${operation}`, response.status);
+    }
+
+    if (!response.ok) {
+      throw new WjApiError(extractUpstreamMessage(json) ?? `WJ ${operation} failed with HTTP ${response.status}`, response.status);
+    }
+    const envelope = z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
+      data: dataSchema.optional(),
+    }).safeParse(json);
+    if (!envelope.success) {
+      throw new WjApiError(`WJ returned an invalid ${operation} response`, response.status);
+    }
+    if (!envelope.data.success) {
+      throw new WjApiError(envelope.data.message ?? `WJ reported ${operation} failure`, response.status);
+    }
+    if (envelope.data.data === undefined) {
+      throw new WjApiError(`WJ returned an invalid ${operation} response`, response.status);
+    }
+    return envelope.data.data;
   }
 }
 

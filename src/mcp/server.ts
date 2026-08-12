@@ -9,7 +9,13 @@ import { type ImageResultData, ImageResultStore, type PersistedImageResult } fro
 import { UsageLimitError } from "../limits.js";
 import type { AppLogger } from "../logger.js";
 import { APP_VERSION } from "../version.js";
-import { WjApiError } from "../wj/client.js";
+import { WjApiError, type WjClient } from "../wj/client.js";
+import {
+  calculateProfitToolInputSchema,
+  profitCalculationDataSchema,
+  savedProfitRecordSchema,
+  saveProfitToolInputSchema,
+} from "../wj/profit-types.js";
 import {
   aspectRatioSchema,
   editImageInputSchema,
@@ -20,7 +26,9 @@ import {
 } from "../wj/types.js";
 
 export const IMAGE_WIDGET_URI = "ui://wj/image-result-v2.html";
-export const WJ_IMAGE_SERVER_INSTRUCTIONS = `Use generate_image immediately when the user explicitly asks to use WJ, WJ image generation, or 无界生图. When the user requests multiple images, make one independent generate_image call per image and dispatch all calls concurrently in the same tool-call turn; never wait for one image before starting the next. Reuse the exact prompt for same-prompt variants, or preserve each distinct prompt. Apply the same concurrent-call rule to multiple independent edit_image requests. Use edit_image for explicit WJ edits of ChatGPT attachments. If native ChatGPT image generation explicitly reports quota exhaustion, rate limiting, or temporary unavailability, call WJ once without asking again. If a generated result exists but its image component is missing and a resultId is available, call get_image_result to restore and display it without generating again. Use fallback links when recovery is unavailable, and never regenerate solely because UI display failed. Default to gpt-image-2, 2K, and 1:1 unless specified otherwise. Do not claim success unless the tool returns at least one asset.`;
+export const WJ_IMAGE_SERVER_INSTRUCTIONS = `Use generate_image immediately when the user explicitly asks to use WJ, WJ image generation, or 无界生图. When the user requests multiple images, make one independent generate_image call per image and dispatch all calls concurrently in the same tool-call turn; never wait for one image before starting the next. Reuse the exact prompt for same-prompt variants, or preserve each distinct prompt. Apply the same concurrent-call rule to multiple independent edit_image requests. Use edit_image for explicit WJ edits of ChatGPT attachments. If native ChatGPT image generation explicitly reports quota exhaustion, rate limiting, or temporary unavailability, call WJ once without asking again. If a generated result exists but its image component is missing and a resultId is available, call get_image_result to restore and display it without generating again. Use fallback links when recovery is unavailable, and never regenerate solely because UI display failed. Default to gpt-image-2, 2K, and 1:1 unless specified otherwise. Do not claim success unless the tool returns at least one asset.
+
+For profit calculations, call calculate_profit first and clearly explain that the result has not been saved. Never save merely because the user asked for a calculation. Only call save_profit_calculation after the user explicitly confirms that the displayed calculation should be recorded. Recording requires an existing product SKU: if the user has not supplied one, ask for it and never invent it. Use a user-provided calculation name when available; otherwise generate a concise recognizable record_name from the country, product context, and price before saving.`;
 
 const persistenceOutputSchema = {
   resultId: z.string().optional(),
@@ -41,12 +49,13 @@ type McpServerDependencies = {
   config: AppConfig;
   generation: GenerationService;
   imageResults: ImageResultStore;
+  profitClient: Pick<WjClient, "calculateProfit" | "saveProfitCalculation">;
   logger: AppLogger;
   widgetHtml: string;
 };
 
 export function createWjMcpServer(dependencies: McpServerDependencies): McpServer {
-  const { config, generation, imageResults, logger, widgetHtml } = dependencies;
+  const { config, generation, imageResults, profitClient, logger, widgetHtml } = dependencies;
   const server = new McpServer(
     { name: "wj-mcp-server", version: APP_VERSION },
     {
@@ -162,6 +171,107 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
           isError: true as const,
           content: [{ type: "text" as const, text: message }],
         };
+      }
+    },
+  );
+
+  registerAppTool(
+    server,
+    "calculate_profit",
+    {
+      title: "Calculate WJ profit",
+      description:
+        "Calculate product profit or reverse-calculate a required selling price using WJ server rules and current exchange rates. This tool never saves a record. Use it first, present the result, and ask whether the user wants to record it.",
+      inputSchema: calculateProfitToolInputSchema,
+      outputSchema: profitCalculationDataSchema.shape,
+      annotations: {
+        title: "Calculate WJ profit",
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+      _meta: {
+        securitySchemes: [{ type: "oauth2", scopes: [WJ_IMAGE_SCOPE] }],
+        "openai/toolInvocation/invoking": "WJ is calculating profit",
+        "openai/toolInvocation/invoked": "WJ profit calculation completed",
+      },
+    },
+    async (rawInput) => {
+      try {
+        const input = calculateProfitToolInputSchema.parse(rawInput);
+        const result = await profitClient.calculateProfit(input);
+        return {
+          structuredContent: result,
+          content: [{
+            type: "text" as const,
+            text: [
+              "WJ profit calculation completed. This result has not been saved.",
+              ...result.results.map((item) => `${item.label}: ${item.value}${item.subValue ? ` ${item.subValue}` : ""}`),
+              `Exchange-rate source: ${result.exchangeRates.source}; updated at ${result.exchangeRates.updatedAt}.`,
+              "Explain the result, then ask whether the user wants to record it. Do not save without explicit confirmation.",
+            ].join("\n"),
+          }],
+        };
+      } catch (error) {
+        logger.warn({ err: error, tool: "calculate_profit" }, "MCP profit calculation failed");
+        return { isError: true as const, content: [{ type: "text" as const, text: toSafeToolError(error) }] };
+      }
+    },
+  );
+
+  registerAppTool(
+    server,
+    "save_profit_calculation",
+    {
+      title: "Record WJ profit calculation",
+      description:
+        "Record a profit calculation only after the user explicitly confirms. Requires a real existing SKU and a recognizable record name. Never invent a SKU. WJ recalculates on the server before saving, and the same SKU updates its existing record.",
+      inputSchema: saveProfitToolInputSchema,
+      outputSchema: savedProfitRecordSchema.shape,
+      annotations: {
+        title: "Record WJ profit calculation",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+      _meta: {
+        securitySchemes: [{ type: "oauth2", scopes: [WJ_IMAGE_SCOPE] }],
+        "openai/toolInvocation/invoking": "WJ is recording the profit calculation",
+        "openai/toolInvocation/invoked": "WJ profit calculation recorded",
+      },
+    },
+    async (rawInput) => {
+      try {
+        const input = saveProfitToolInputSchema.parse(rawInput);
+        const saved = await profitClient.saveProfitCalculation(input);
+        const structuredContent = {
+          id: saved.id,
+          sku: saved.sku,
+          recordName: saved.recordName,
+          mode: saved.mode,
+          country: saved.country,
+          estimatedProfitCny: saved.estimatedProfitCny,
+          roasBreakeven: saved.roasBreakeven,
+          displaySalePriceUsd: saved.displaySalePriceUsd,
+          calculatedResults: saved.calculatedResults,
+        };
+        return {
+          structuredContent,
+          content: [{
+            type: "text" as const,
+            text: [
+              `Profit calculation recorded successfully for SKU ${saved.sku}.`,
+              `Record name: ${saved.recordName || input.record_name}.`,
+              `Estimated profit (CNY): ${saved.estimatedProfitCny}.`,
+              `Break-even ROAS: ${saved.roasBreakeven}.`,
+            ].join("\n"),
+          }],
+        };
+      } catch (error) {
+        logger.warn({ err: error, tool: "save_profit_calculation" }, "MCP profit recording failed");
+        return { isError: true as const, content: [{ type: "text" as const, text: toSafeToolError(error) }] };
       }
     },
   );
@@ -321,6 +431,6 @@ function toSafeToolError(error: unknown): string {
     if (error.status === 429) return "WJ is currently rate-limited. Please try again later.";
     return error.message;
   }
-  if (error instanceof z.ZodError) return `Invalid image request: ${error.issues[0]?.message ?? "validation failed"}`;
-  return "WJ image generation failed unexpectedly. Please try again.";
+  if (error instanceof z.ZodError) return `Invalid request: ${error.issues[0]?.message ?? "validation failed"}`;
+  return "WJ tool request failed unexpectedly. Please try again.";
 }

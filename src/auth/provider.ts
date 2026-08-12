@@ -291,14 +291,14 @@ function renderInteractionPage(details: InteractionDetails, clientName = "ChatGP
   const name = escapeHtml(clientName);
   const uid = encodeURIComponent(details.uid);
   const isLogin = details.prompt.name === "login";
-  const title = isLogin ? "连接 WJ 生图" : "确认授权";
+  const title = isLogin ? "连接 WJ 工具" : "确认授权";
   const description = isLogin
-    ? `${name} 正在请求连接 WJ 生图服务。请输入服务端配置的共享访问口令。`
-    : `${name} 将获得调用 WJ 生图工具的权限，并会消耗服务端配置的 WJ 额度。`;
+    ? `${name} 正在请求连接 WJ 工具服务。请输入服务端配置的共享访问口令。`
+    : `${name} 将获得调用 WJ 图片与利润试算工具的权限。图片生成会消耗服务端配置的 WJ 额度。`;
   const action = isLogin ? `/oauth/interaction/${uid}/login` : `/oauth/interaction/${uid}/confirm`;
   const field = isLogin
     ? '<label for="password">访问口令</label><input id="password" name="password" type="password" autocomplete="current-password" required autofocus>'
-    : '<div class="scope"><strong>授权范围</strong><span>使用 WJ 生成和展示图片</span></div>';
+    : '<div class="scope"><strong>授权范围</strong><span>使用 WJ 生成和展示图片，以及试算并按确认录入利润结果</span></div>';
   const errorHtml = error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : "";
 
   return pageShell(title, `

@@ -24,8 +24,31 @@ describe("WJ MCP server", () => {
       assets: [{ type: "image", mime_type: "image/png", url: "https://img.downk.cc/generated.png", width: 1024, height: 1024 }],
     });
     const generation = { generate } as unknown as GenerationService;
+    const calculateProfit = vi.fn().mockResolvedValue({
+      formulaVersion: "1.0.0",
+      input: { mode: "sellingProfit", country: "US", payment: "US", regulatory: "NONE" },
+      results: [{ label: "Profit (CNY)", value: "56.39" }],
+      exchangeRates: {
+        usdRates: { USD: 1, CNY: 7 },
+        cnyRates: { USD: 1 / 7, CNY: 1 },
+        updatedAt: "2026-08-11T00:00:00.000Z",
+        source: "test",
+      },
+    });
+    const saveProfitCalculation = vi.fn().mockResolvedValue({
+      id: "profit-record-1",
+      sku: "SKU-001",
+      recordName: "US launch 19.99 USD",
+      mode: "sellingProfit",
+      country: "US",
+      estimatedProfitCny: 56.39,
+      roasBreakeven: "2.48",
+      displaySalePriceUsd: 19.99,
+      calculatedResults: { "Profit (CNY)": "56.39" },
+    });
+    const profitClient = { calculateProfit, saveProfitCalculation };
     const imageResults = testImageResultStore();
-    const server = createWjMcpServer({ config: testConfig(), generation, imageResults, logger: testLogger(), widgetHtml: "<!doctype html><p>widget</p>" });
+    const server = createWjMcpServer({ config: testConfig(), generation, imageResults, profitClient, logger: testLogger(), widgetHtml: "<!doctype html><p>widget</p>" });
     const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -37,6 +60,8 @@ describe("WJ MCP server", () => {
     const tool = tools.tools.find((item) => item.name === "generate_image");
     const editTool = tools.tools.find((item) => item.name === "edit_image");
     const recoveryTool = tools.tools.find((item) => item.name === "get_image_result");
+    const calculateProfitTool = tools.tools.find((item) => item.name === "calculate_profit");
+    const saveProfitTool = tools.tools.find((item) => item.name === "save_profit_calculation");
     expect(tools.tools.map((item) => item.name)).not.toContain("generate_images");
     expect(tool?._meta?.["ui/resourceUri"]).toBe(IMAGE_WIDGET_URI);
     expect(tool?._meta?.["openai/outputTemplate"]).toBe(IMAGE_WIDGET_URI);
@@ -84,6 +109,48 @@ describe("WJ MCP server", () => {
       readOnlyHint: true,
       idempotentHint: true,
       openWorldHint: false,
+    }));
+    expect(calculateProfitTool?.annotations).toEqual(expect.objectContaining({ readOnlyHint: true }));
+    expect(saveProfitTool?.inputSchema.required).toEqual(expect.arrayContaining(["sku", "record_name"]));
+
+    const profitResponse = await client.callTool({
+      name: "calculate_profit",
+      arguments: { country: "US", cost: 35, shipping: 28, selling_price: 19.99 },
+    });
+    expect(profitResponse.isError).not.toBe(true);
+    expect(profitResponse.content).toEqual([expect.objectContaining({
+      type: "text",
+      text: expect.stringContaining("has not been saved"),
+    })]);
+    expect(calculateProfit).toHaveBeenCalledWith(expect.objectContaining({
+      country: "US",
+      packaging: 2,
+      selling_price: 19.99,
+    }));
+    expect(saveProfitCalculation).not.toHaveBeenCalled();
+
+    const missingSkuResponse = await client.callTool({
+      name: "save_profit_calculation",
+      arguments: { country: "US", cost: 35, shipping: 28, selling_price: 19.99, record_name: "US launch" },
+    });
+    expect(missingSkuResponse.isError).toBe(true);
+    expect(saveProfitCalculation).not.toHaveBeenCalled();
+
+    const saveResponse = await client.callTool({
+      name: "save_profit_calculation",
+      arguments: {
+        sku: "SKU-001",
+        record_name: "US launch 19.99 USD",
+        country: "US",
+        cost: 35,
+        shipping: 28,
+        selling_price: 19.99,
+      },
+    });
+    expect(saveResponse.isError).not.toBe(true);
+    expect(saveProfitCalculation).toHaveBeenCalledWith(expect.objectContaining({
+      sku: "SKU-001",
+      record_name: "US launch 19.99 USD",
     }));
 
     const response = await client.callTool({
@@ -193,7 +260,14 @@ describe("WJ MCP server", () => {
     const generation = {
       generate: vi.fn().mockRejectedValue(new WjApiError("authorization policy denied the request", 403)),
     } as unknown as GenerationService;
-    const server = createWjMcpServer({ config: testConfig(), generation, imageResults: testImageResultStore(), logger: testLogger(), widgetHtml: "<!doctype html><p>widget</p>" });
+    const server = createWjMcpServer({
+      config: testConfig(),
+      generation,
+      imageResults: testImageResultStore(),
+      profitClient: { calculateProfit: vi.fn(), saveProfitCalculation: vi.fn() },
+      logger: testLogger(),
+      widgetHtml: "<!doctype html><p>widget</p>",
+    });
     const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -227,6 +301,7 @@ describe("WJ MCP server", () => {
       config: testConfig(),
       generation,
       imageResults,
+      profitClient: { calculateProfit: vi.fn(), saveProfitCalculation: vi.fn() },
       logger: testLogger(),
       widgetHtml: "<!doctype html><p>widget</p>",
     });

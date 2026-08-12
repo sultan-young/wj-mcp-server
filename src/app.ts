@@ -48,7 +48,7 @@ export async function createApplication(dependencies: AppDependencies) {
 
   app.get("/healthz", (_req, res) => res.status(200).json({ status: "ok" }));
   app.get("/", (_req, res) => res.status(200).json({
-    name: "WJ Image MCP Server",
+    name: "WJ MCP Server",
     mcp: config.mcpUrl.href,
     authentication: "OAuth 2.1 with PKCE",
   }));
@@ -64,7 +64,7 @@ export async function createApplication(dependencies: AppDependencies) {
       resource: config.mcpUrl.href,
       authorization_servers: [config.publicBaseUrl.origin],
       scopes_supported: [WJ_IMAGE_SCOPE],
-      resource_name: "WJ Image Generation",
+      resource_name: "WJ Tools",
       resource_documentation: new URL("/", config.publicBaseUrl).href,
     });
   });
@@ -74,7 +74,7 @@ export async function createApplication(dependencies: AppDependencies) {
     resourceServerUrl: config.mcpUrl,
     serviceDocumentationUrl: new URL("/", config.publicBaseUrl),
     scopesSupported: [WJ_IMAGE_SCOPE],
-    resourceName: "WJ Image Generation",
+    resourceName: "WJ Tools",
   }));
   app.use(auth.interactionRouter);
   app.post("/reg", (req, res, next) => {
@@ -98,7 +98,7 @@ export async function createApplication(dependencies: AppDependencies) {
   const mcpBody = express.json({ limit: "1mb" });
 
   app.post("/mcp", authenticate, mcpBody, asyncHandler(async (req, res) => {
-    const mcpServer = createWjMcpServer({ config, generation, imageResults, logger, widgetHtml });
+    const mcpServer = createWjMcpServer({ config, generation, imageResults, profitClient: wjClient, logger, widgetHtml });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on("close", () => void transport.close());
     await mcpServer.connect(transport);

@@ -52,7 +52,7 @@ describe("OAuth flow", () => {
     const loginPage = await followLocalRedirects(agent, initial, config.publicBaseUrl);
     expect(loginPage.status).toBe(200);
     expect(loginPage.headers["referrer-policy"]).toBe("same-origin");
-    expect(loginPage.text).toContain("连接 WJ 生图");
+    expect(loginPage.text).toContain("连接 WJ 工具");
     const interactionPath = new URL(loginPage.request.url, config.publicBaseUrl).pathname;
 
     await agent

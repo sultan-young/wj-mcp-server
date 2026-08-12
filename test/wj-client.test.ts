@@ -83,4 +83,90 @@ describe("WjClient", () => {
       ],
     }));
   });
+
+  it("calculates profit through the WJ server with country defaults handled upstream", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      data: {
+        formulaVersion: "1.0.0",
+        input: { mode: "sellingProfit", country: "US", payment: "US", regulatory: "NONE" },
+        results: [{ label: "Profit (CNY)", value: "56.39" }],
+        exchangeRates: {
+          usdRates: { USD: 1, CNY: 7 },
+          cnyRates: { USD: 1 / 7, CNY: 1 },
+          updatedAt: "2026-08-11T00:00:00.000Z",
+          source: "test",
+        },
+      },
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const client = new WjClient(testConfig(), testLogger(), fetchMock);
+
+    const result = await client.calculateProfit({
+      mode: "sellingProfit",
+      country: "US",
+      cost: 35,
+      shipping: 28,
+      packaging: 2,
+      labor: 0,
+      refund_loss_rate: 1.5,
+      ad_rate: 0,
+      selling_price: 19.99,
+      shipping_income: 0,
+      gift_wrap_income: 0,
+      price_currency: "USD",
+      discount: 0,
+    });
+
+    expect(result.results[0]?.value).toBe("56.39");
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(url)).toBe("https://wj.example.com/api/v1/commonTools/profitCalculator/calculate");
+    expect(JSON.parse(String(init?.body))).toEqual(expect.objectContaining({
+      country: "US",
+      sellingPrice: 19.99,
+      refundLossRate: 1.5,
+    }));
+  });
+
+  it("records profit with a required SKU and generated record name", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      data: {
+        id: "record-1",
+        sku: "SKU-001",
+        recordName: "US launch 19.99 USD",
+        mode: "sellingProfit",
+        country: "US",
+        estimatedProfitCny: 56.39,
+        roasBreakeven: "2.48",
+        displaySalePriceUsd: 19.99,
+        calculatedResults: { "Profit (CNY)": "56.39" },
+      },
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const client = new WjClient(testConfig(), testLogger(), fetchMock);
+
+    await client.saveProfitCalculation({
+      sku: "SKU-001",
+      record_name: "US launch 19.99 USD",
+      mode: "sellingProfit",
+      country: "US",
+      cost: 35,
+      shipping: 28,
+      packaging: 2,
+      labor: 0,
+      refund_loss_rate: 1.5,
+      ad_rate: 0,
+      selling_price: 19.99,
+      shipping_income: 0,
+      gift_wrap_income: 0,
+      price_currency: "USD",
+      discount: 0,
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(url)).toBe("https://wj.example.com/api/v1/commonTools/profitCalculator/sku/upsert");
+    expect(JSON.parse(String(init?.body))).toEqual(expect.objectContaining({
+      sku: "SKU-001",
+      recordName: "US launch 19.99 USD",
+    }));
+  });
 });

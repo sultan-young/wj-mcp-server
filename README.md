@@ -1,11 +1,14 @@
 # wj-mcp-server
 
-把现有 WJ 生图能力开放为 ChatGPT Work 可连接的远程 MCP 插件。第一版没有团队、成员或后台管理概念，使用一个共享 OAuth 口令控制访问。
+把现有 WJ 图片与利润试算能力开放为 ChatGPT Work 可连接的远程 MCP 插件。第一版没有团队、成员或后台管理概念，使用一个共享 OAuth 口令控制访问。
 
 ## 已实现
 
 - 标准 MCP Streamable HTTP 端点：`POST /mcp`
 - 图片创作能力只有 `generate_image` 和 `edit_image`，另提供只读的 `get_image_result` 结果恢复工具
+- 利润能力包含只读的 `calculate_profit` 和需要用户明确确认的 `save_profit_calculation`
+- 试算不要求 SKU；录入必须提供商品池中真实存在的 SKU，并由 WJ 服务端重新计算后保存
+- 录入名称在前端为可选字段；通过 MCP 录入时由 GPT 使用用户名称或自动生成简短名称
 - 每次工具调用只生成或编辑一张图；用户要求多图时，ChatGPT 应同时发起多个独立工具调用
 - 每次成功结果保存到 Redis 30 天，GPT 或图片组件都可通过 `get_image_result` 无额度恢复
 - 工具文本同时返回原图链接，Widget 不可用时仍能打开结果
@@ -23,10 +26,9 @@
 ChatGPT Work
   -> HTTPS /mcp + OAuth
   -> wj-mcp-server
-  -> POST https://wj.zaowuwujie.ltd/api/v1/proxy/ai/generate/image
-  -> wj-server / wj-ai-server / LiteLLM
-  -> public image URL
-  -> MCP Apps inline image component
+  -> WJ Open Platform API
+     -> image: wj-server / wj-ai-server / LiteLLM -> image component
+     -> profit: wj-server calculation / confirmed record upsert
 ```
 
 `wj-mcp-server` 不直接请求 LiteLLM。它使用 WJ 开放平台接口，因此保留 WJ 已有的 Key、额度、日志和模型路由。
@@ -86,7 +88,7 @@ curl https://mcp.wj.zaowuwujie.ltd/.well-known/oauth-protected-resource/mcp
 
 1. 打开“工作”模式，进入“连接插件”或插件管理页。
 2. 选择“新插件”。
-3. 名称填 `WJ 生图`。
+3. 名称填 `WJ 工具`。
 4. 服务器 URL 填 `https://mcp.wj.zaowuwujie.ltd/mcp`。
 5. 身份验证选择 `OAuth`。
 6. 勾选自定义 MCP 风险确认后创建。
@@ -95,6 +97,8 @@ curl https://mcp.wj.zaowuwujie.ltd/.well-known/oauth-protected-resource/mcp
 每个互不关联的 ChatGPT 账号都重复一次连接即可。成员不需要也不应拿到 `WJ_API_KEY`。只知道 MCP URL 的人会收到 `401`，没有共享口令无法取得访问令牌或调用生图。
 
 推荐使用规则见 `docs/chatgpt-instructions.md`。显式说“使用 WJ 生图”可以稳定触发；ChatGPT 内置生图限流后的回退取决于平台是否把失败暴露给模型，MCP 服务本身无法读取账号内部额度。
+
+利润试算应先调用 `calculate_profit` 并向用户展示结果。只有用户明确确认录入后，才调用 `save_profit_calculation`；缺少 SKU 时必须先询问用户，不能虚构 SKU。部署前还需要在 WJ 开放平台为 `WJ_API_KEY` 对应凭证授予利润试算和利润录入接口能力。
 
 生成多张图片时，ChatGPT 应为每张图片分别调用一次 `generate_image`，并在同一个工具调用轮次中并发发出，不能等待上一张完成后再开始下一张。同提示词变体在每次调用中复用相同提示词，不同图片则分别保留各自提示词。服务端通过 `IMAGE_MAX_CONCURRENCY` 限制每个 OAuth 插件终端实际同时请求 WJ 的数量，默认每个终端 10 个；不同终端使用彼此独立的并发队列。
 
