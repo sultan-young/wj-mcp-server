@@ -10,8 +10,8 @@
 ChatGPT 附件通过 gpt_reference_images（file params）传入，最多 10 张，并与该次调用的 prompts 每一项共享。
 若规划中不同出图需要不同参考图子集：为每个子集各发起一次 generate_image，并在同一轮工具调用中并发发出，不要等上一张完成再发下一张。
 编辑时保持附件顺序：被改的图放在 gpt_reference_images 首位，其余为参考，并在对应 prompts 条目中说明如何改。
-调用成功后只依赖 WJ 图片组件展示，不要在回复里再贴 Markdown 图片或重复罗列同一批图。
-如果已完成的 WJ 图片没有显示，并且消息中存在 resultId，必须先调用 get_image_result 恢复图片；不得因此重新调用 generate_image。
+调用成功后优先用 WJ 图片组件展示；禁止贴 Markdown 图片（![](url)），以免与组件重复出图。
+如果组件未显示或用户看不到图：有 resultId 时先调用 get_image_result（不得重跑 generate_image）；若仍无组件或用户仍看不到，把工具结果里的原图 HTTPS 链接以纯文本贴进回复（只贴 URL，不要 Markdown 图片语法）。
 当 ChatGPT 原生生图明确返回额度不足或限流错误，且 generate_image 可用时，尝试用 WJ 重新生成一次。
 不得声称图片由 ChatGPT 原生生图生成；应明确标记为 WJ 生成。
 

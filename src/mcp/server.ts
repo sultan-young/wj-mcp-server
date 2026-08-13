@@ -35,8 +35,8 @@ import {
   type WjImageData,
 } from "../wj/types.js";
 
-export const IMAGE_WIDGET_URI = "ui://wj/image-result-v5.html";
-export const WJ_IMAGE_SERVER_INSTRUCTIONS = `Use generate_image immediately when the user explicitly asks to use WJ, WJ image generation/editing, or 无界生图. Always pass prompts as a string array (1–10 entries); a single image uses a one-element array. gpt_reference_images are shared by every prompt in the same call. When every output shares the same references, use one generate_image with multiple prompts. When outputs need different reference subsets, issue one generate_image per subset and dispatch those independent calls concurrently in the same tool-call turn—never wait for one to finish before starting the next. Preserve attachment order; when editing, put the image being changed first in gpt_reference_images, then other references, and describe the change in each prompts entry. After success, rely on the WJ image component to display results; do not paste markdown image embeds or re-list the same pictures in the assistant reply. Mention Result ID only when useful for recovery. If the component is missing and a resultId is available, call get_image_result instead of regenerating. Use plain-text original links only as a last-resort fallback. If native ChatGPT image generation explicitly reports quota exhaustion, rate limiting, or temporary unavailability, call WJ once without asking again. Default to gpt-image-2, 2K, and 1:1 unless specified otherwise. Do not claim success unless the tool returns at least one asset.
+export const IMAGE_WIDGET_URI = "ui://wj/image-result-v6.html";
+export const WJ_IMAGE_SERVER_INSTRUCTIONS = `Use generate_image immediately when the user explicitly asks to use WJ, WJ image generation/editing, or 无界生图. Always pass prompts as a string array (1–10 entries); a single image uses a one-element array. gpt_reference_images are shared by every prompt in the same call. When every output shares the same references, use one generate_image with multiple prompts. When outputs need different reference subsets, issue one generate_image per subset and dispatch those independent calls concurrently in the same tool-call turn—never wait for one to finish before starting the next. Preserve attachment order; when editing, put the image being changed first in gpt_reference_images, then other references, and describe the change in each prompts entry. After success, prefer the WJ image component for display. Never paste markdown image embeds (![](url))—that duplicates the component when it is visible. If the component is missing or the user cannot see the images: when a resultId is available, call get_image_result once instead of regenerating; if the component is still missing or the user still cannot see the images, paste the plain-text HTTPS original links from the tool result into the assistant reply (URLs only, no markdown image syntax). Mention Result ID when useful for recovery. If native ChatGPT image generation explicitly reports quota exhaustion, rate limiting, or temporary unavailability, call WJ once without asking again. Default to gpt-image-2, 2K, and 1:1 unless specified otherwise. Do not claim success unless the tool returns at least one asset.
 
 For profit calculations, call calculate_profit first and clearly explain that the result has not been saved. Never save merely because the user asked for a calculation. Only call save_profit_calculation after the user explicitly confirms that the displayed calculation should be recorded. Recording requires an existing product SKU: if the user has not supplied one, ask for it and never invent it. Use a user-provided calculation name when available; otherwise generate a concise recognizable record_name from the country, product context, and price before saving.
 
@@ -128,7 +128,7 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
     {
       title: "使用 WJ 生成图片",
       description:
-        "Generate or edit and display image(s) through WJ. Always pass prompts as a string array (1–10); one image uses [\"...\"]. The server runs all entries concurrently with shared model/aspect_ratio/resolution. Optional gpt_reference_images (file params, up to 10) are shared across every prompt in the call. Default to gpt-image-2 and 2K. Let the WJ image component display results; do not re-embed the same images as markdown in the assistant reply. Each generated image consumes WJ quota.",
+        "Generate or edit and display image(s) through WJ. Always pass prompts as a string array (1–10); one image uses [\"...\"]. The server runs all entries concurrently with shared model/aspect_ratio/resolution. Optional gpt_reference_images (file params, up to 10) are shared across every prompt in the call. Default to gpt-image-2 and 2K. Prefer the WJ image component for display; never use markdown image embeds. If the component is missing, recover with get_image_result when possible, otherwise paste plain-text HTTPS original links from the tool result. Each generated image consumes WJ quota.",
       inputSchema: generateImageInputSchema,
       outputSchema: imageOutputSchema,
       annotations: {
@@ -540,7 +540,7 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
     {
       title: "恢复 WJ 图片结果",
       description:
-        "Retrieve and display a previously generated WJ image by resultId when its image component is missing. Always use this instead of regenerating a completed image. This read-only action does not consume WJ image quota. Results are retained for 30 days.",
+        "Retrieve and display a previously generated WJ image by resultId when its image component is missing. Always use this instead of regenerating a completed image. If the component is still missing afterward, paste plain-text HTTPS original links from the tool result (no markdown image embeds). This read-only action does not consume WJ image quota. Results are retained for 30 days.",
       inputSchema: {
         result_id: z.string().min(1).describe("The resultId returned by an earlier WJ image tool call."),
       },
@@ -652,8 +652,8 @@ function buildImageToolResult(
     `WJ ${actionText} ${structuredContent.assets.length} image${structuredContent.assets.length === 1 ? "" : "s"} with ${structuredContent.model}.`,
     ...(resultId ? [`Result ID: ${resultId}. Retained until ${expiry}.`] : []),
     ...(persisted ? [] : ["The image was generated successfully, but result persistence failed. Save the original links below."]),
-    "Display these results with the WJ image component only. Do not paste markdown image embeds or duplicate the pictures in the assistant reply.",
-    "Fallback original links (plain text, only if the component is unavailable):",
+    "Prefer the WJ image component for display. Never paste markdown image embeds (![](url)).",
+    "If the component is missing or the user cannot see the images, paste these plain-text HTTPS links in the assistant reply (URLs only):",
     ...structuredContent.assets.map((asset, index) => `${index + 1}. ${asset.url}`),
   ];
 

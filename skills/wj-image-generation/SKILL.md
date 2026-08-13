@@ -43,10 +43,10 @@ Use `generate_image` for creation and editing. Use `get_image_result` only to re
 ## Handle results
 
 1. Treat generation as successful only when the tool returns at least one asset.
-2. Let the WJ image component display results. Do not paste markdown image embeds or re-list the same pictures in the assistant reply.
+2. Prefer the WJ image component for display. Never paste markdown image embeds (`![](url)`); that duplicates the component when it is visible.
 3. Identify the result as generated through WJ.
 4. If an image component does not display and a `resultId` is available, call `get_image_result` before doing anything else. Never regenerate solely because the component failed to display.
 5. `get_image_result` is a read-only recovery tool: it retrieves the completed result, mounts the image component again, and consumes no WJ image quota.
-6. If recovery is unavailable or the result has expired, use plain-text original-image links only as a last resort and explain the limitation without regenerating automatically.
+6. If the component is still missing, the user still cannot see the images, recovery is unavailable, or the result has expired: paste the plain-text HTTPS original links from the tool result into the assistant reply (URLs only, no markdown image syntax). Do not regenerate automatically.
 7. Retry the same request at most once for a transient timeout or `502`-class upstream failure.
 8. Do not retry authentication, authorization, WJ quota, or WJ rate-limit failures. Report the actionable error clearly.

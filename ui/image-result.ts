@@ -9,7 +9,6 @@ import {
   getImageResultIdKey,
   getImageResultKey,
   imageResultMatchesBinding,
-  type ImageAsset,
   type ImageResult,
 } from "./image-result-state.js";
 import "./styles.css";
@@ -32,15 +31,10 @@ const loading = requiredElement<HTMLDivElement>("loading");
 const errorBox = requiredElement<HTMLDivElement>("error");
 const result = requiredElement<HTMLElement>("result");
 const thumbs = requiredElement<HTMLElement>("thumbs");
-const mainStage = requiredElement<HTMLButtonElement>("main-stage");
-const mainImage = requiredElement<HTMLImageElement>("main-image");
 const model = requiredElement<HTMLElement>("model");
 const details = requiredElement<HTMLSpanElement>("details");
 const openButton = requiredElement<HTMLButtonElement>("open");
 const downloadButton = requiredElement<HTMLButtonElement>("download");
-const lightbox = requiredElement<HTMLDivElement>("lightbox");
-const lightboxImage = requiredElement<HTMLImageElement>("lightbox-image");
-const lightboxClose = requiredElement<HTMLButtonElement>("lightbox-close");
 let current: ImageResult | undefined;
 let activeIndex = 0;
 let boundResultKey: string | undefined;
@@ -65,22 +59,7 @@ app.addEventListener("toolresult", (params) => {
 
 app.onhostcontextchanged = applyHostContext;
 
-mainStage.addEventListener("click", () => {
-  const asset = currentAsset();
-  if (asset) openLightbox(asset);
-});
-
-lightbox.addEventListener("click", (event) => {
-  if (event.target === lightbox || event.target === lightboxClose) closeLightbox();
-});
-
-lightboxClose.addEventListener("click", closeLightbox);
-
 window.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !lightbox.hidden) {
-    closeLightbox();
-    return;
-  }
   if (!current || current.assets.length < 2) return;
   if (event.key === "ArrowLeft") showIndex(activeIndex - 1);
   if (event.key === "ArrowRight") showIndex(activeIndex + 1);
@@ -170,26 +149,21 @@ function render(data: ImageResult, persist: boolean): void {
   activeIndex = 0;
   thumbs.replaceChildren();
 
-  const multi = data.assets.length > 1;
-  thumbs.hidden = !multi;
-
-  if (multi) {
-    for (const [index, asset] of data.assets.entries()) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "thumb";
-      button.title = `切换到第 ${index + 1} 张`;
-      button.setAttribute("aria-label", `切换到第 ${index + 1} 张`);
-      const image = document.createElement("img");
-      image.src = asset.url;
-      image.alt = `缩略图 ${index + 1}`;
-      image.loading = index === 0 ? "eager" : "lazy";
-      image.decoding = "async";
-      image.referrerPolicy = "no-referrer";
-      button.append(image);
-      button.addEventListener("click", () => showIndex(index));
-      thumbs.append(button);
-    }
+  for (const [index, asset] of data.assets.entries()) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "thumb";
+    button.title = `选择第 ${index + 1} 张`;
+    button.setAttribute("aria-label", `选择第 ${index + 1} 张`);
+    const image = document.createElement("img");
+    image.src = asset.url;
+    image.alt = `生成图片 ${index + 1}`;
+    image.loading = index === 0 ? "eager" : "lazy";
+    image.decoding = "async";
+    image.referrerPolicy = "no-referrer";
+    button.append(image);
+    button.addEventListener("click", () => showIndex(index));
+    thumbs.append(button);
   }
 
   showIndex(0);
@@ -201,31 +175,12 @@ function showIndex(nextIndex: number): void {
   if (!current?.assets.length) return;
   const total = current.assets.length;
   activeIndex = ((nextIndex % total) + total) % total;
-  const asset = current.assets[activeIndex]!;
-  mainImage.src = asset.url;
-  mainImage.alt = `WJ 生成图片 ${activeIndex + 1}`;
-  if (asset.width) mainImage.width = asset.width;
-  else mainImage.removeAttribute("width");
-  if (asset.height) mainImage.height = asset.height;
-  else mainImage.removeAttribute("height");
 
   thumbs.querySelectorAll(".thumb").forEach((node, index) => {
     node.classList.toggle("is-active", index === activeIndex);
   });
 
   updateChrome(current);
-  if (!lightbox.hidden) openLightbox(asset);
-}
-
-function openLightbox(asset: ImageAsset): void {
-  lightboxImage.src = asset.url;
-  lightboxImage.alt = `大图预览 ${activeIndex + 1}`;
-  lightbox.hidden = false;
-}
-
-function closeLightbox(): void {
-  lightbox.hidden = true;
-  lightboxImage.removeAttribute("src");
 }
 
 function maybePersist(data: ImageResult, persist: boolean, resultKey: string): void {
@@ -291,7 +246,6 @@ function currentAsset() {
 function showResultUnavailable(): void {
   loading.hidden = true;
   result.hidden = true;
-  closeLightbox();
   errorBox.textContent = "图片结果暂时无法恢复，请使用消息中的原图链接。";
   errorBox.hidden = false;
 }

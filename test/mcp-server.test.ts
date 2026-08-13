@@ -88,7 +88,7 @@ describe("WJ MCP server", () => {
     expect(tool?.inputSchema.properties).not.toHaveProperty("count");
     expect(tool?._meta?.securitySchemes).toEqual([{ type: "oauth2", scopes: ["wj:tools"] }]);
     expect(tool?._meta?.["openai/fileParams"]).toEqual(["gpt_reference_images"]);
-    expect(tool?.description).toContain("Let the WJ image component display results");
+    expect(tool?.description).toContain("Prefer the WJ image component for display");
     expect(tool?.description).toContain("prompts");
     expect(tool?.inputSchema).toEqual(expect.objectContaining({
       type: "object",
@@ -175,10 +175,13 @@ describe("WJ MCP server", () => {
     }));
     expect(response.content).toEqual([expect.objectContaining({
       type: "text",
-      text: expect.stringContaining("https://img.downk.cc/generated.png"),
+      text: expect.stringMatching(/plain-text HTTPS links[\s\S]*https:\/\/img\.downk\.cc\/generated\.png/),
     })]);
     expect(response.content).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "resource_link" }),
+    ]));
+    expect(response.content).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "image" }),
     ]));
     expect(generate).toHaveBeenCalledWith("wj-shared-access", expect.objectContaining({
       model: "gpt-image-2",

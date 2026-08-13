@@ -35,62 +35,30 @@ main {
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
-  align-items: stretch;
-}
-
-.main-col {
-  min-width: 0;
-  display: grid;
-  gap: 8px;
-}
-
-.main-stage {
-  display: block;
-  width: 100%;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: zoom-in;
-  border-radius: 14px;
-  overflow: hidden;
-}
-
-.main-stage:focus-visible {
-  outline: 2px solid var(--color-ring-primary, #16845d);
-  outline-offset: 2px;
-}
-
-#main-image {
-  display: block;
-  width: 100%;
-  height: auto;
-  max-height: min(72vh, 760px);
-  object-fit: contain;
-  background: var(--color-background-secondary, #eef2ef);
-  border-radius: 14px;
 }
 
 .thumbs {
-  width: 72px;
-  max-height: min(72vh, 760px);
-  overflow-y: auto;
-  overflow-x: hidden;
+  height: min(52vh, 420px);
+  min-height: 280px;
+  overflow-x: auto;
+  overflow-y: hidden;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-right: 2px;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 10px;
+  padding-bottom: 2px;
   scrollbar-width: thin;
 }
 
 .thumb {
   flex: 0 0 auto;
-  width: 64px;
-  height: 64px;
+  height: 100%;
+  aspect-ratio: 1;
+  max-width: min(100%, 420px);
   padding: 0;
   border: 2px solid transparent;
-  border-radius: 12px;
+  border-radius: 14px;
   overflow: hidden;
   background: var(--color-background-secondary, #eef2ef);
   cursor: pointer;
@@ -176,47 +144,9 @@ button.action,
   stroke-width: 1.8;
 }
 
-.lightbox {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgba(8, 12, 10, 0.78);
-  cursor: zoom-out;
-}
-
-.lightbox[hidden] {
-  display: none !important;
-}
-
-.lightbox img {
-  max-width: min(96vw, 1400px);
-  max-height: 92vh;
-  object-fit: contain;
-  border-radius: 12px;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
-}
-
-.lightbox-close {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  width: 40px;
-  height: 40px;
-  border: 0;
-  border-radius: 999px;
-  font-size: 28px;
-  line-height: 1;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.16);
-  cursor: pointer;
-}
-
 .loading,
 .error {
-  min-height: 180px;
+  min-height: 280px;
   display: grid;
   place-items: center;
   gap: 12px;
@@ -226,8 +156,8 @@ button.action,
 
 .skeleton {
   width: 100%;
-  aspect-ratio: 16 / 9;
-  max-height: 420px;
+  height: min(52vh, 420px);
+  min-height: 280px;
   border-radius: 14px;
   background: linear-gradient(100deg, #edf1ef 20%, #f7f9f8 45%, #edf1ef 70%);
   background-size: 220% 100%;
@@ -254,23 +184,14 @@ button.action,
 }
 
 @media (max-width: 520px) {
-  .layout {
-    grid-template-columns: 1fr;
-  }
-
   .thumbs {
-    width: 100%;
-    max-height: none;
-    flex-direction: row;
-    overflow-x: auto;
-    overflow-y: hidden;
-    padding-right: 0;
-    padding-bottom: 2px;
+    height: min(48vh, 360px);
+    min-height: 240px;
   }
 
-  .thumb {
-    width: 56px;
-    height: 56px;
+  .skeleton {
+    height: min(48vh, 360px);
+    min-height: 240px;
   }
 
   .meta-row {
