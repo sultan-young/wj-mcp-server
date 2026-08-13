@@ -2,7 +2,7 @@ import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@model
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { WJ_IMAGE_SCOPE } from "../auth/provider.js";
+import { WJ_MCP_SCOPE } from "../auth/provider.js";
 import type { AppConfig } from "../config.js";
 import type { GenerationService } from "../generation-service.js";
 import { type ImageResultData, ImageResultStore, type PersistedImageResult } from "../image-result-store.js";
@@ -29,19 +29,55 @@ import {
 } from "../wj/product-draft-types.js";
 import {
   aspectRatioSchema,
-  editImageInputSchema,
   generateImageInputSchema,
   imageAssetSchema,
   resolutionSchema,
   type WjImageData,
 } from "../wj/types.js";
 
-export const IMAGE_WIDGET_URI = "ui://wj/image-result-v2.html";
-export const WJ_IMAGE_SERVER_INSTRUCTIONS = `Use generate_image immediately when the user explicitly asks to use WJ, WJ image generation, or 无界生图. When the user requests multiple images, make one independent generate_image call per image and dispatch all calls concurrently in the same tool-call turn; never wait for one image before starting the next. Reuse the exact prompt for same-prompt variants, or preserve each distinct prompt. Apply the same concurrent-call rule to multiple independent edit_image requests. Use edit_image for explicit WJ edits of ChatGPT attachments. If native ChatGPT image generation explicitly reports quota exhaustion, rate limiting, or temporary unavailability, call WJ once without asking again. If a generated result exists but its image component is missing and a resultId is available, call get_image_result to restore and display it without generating again. Use fallback links when recovery is unavailable, and never regenerate solely because UI display failed. Default to gpt-image-2, 2K, and 1:1 unless specified otherwise. Do not claim success unless the tool returns at least one asset.
+export const IMAGE_WIDGET_URI = "ui://wj/image-result-v5.html";
+export const WJ_IMAGE_SERVER_INSTRUCTIONS = `Use generate_image immediately when the user explicitly asks to use WJ, WJ image generation/editing, or 无界生图. Always pass prompts as a string array (1–10 entries); a single image uses a one-element array. gpt_reference_images are shared by every prompt in the same call. When every output shares the same references, use one generate_image with multiple prompts. When outputs need different reference subsets, issue one generate_image per subset and dispatch those independent calls concurrently in the same tool-call turn—never wait for one to finish before starting the next. Preserve attachment order; when editing, put the image being changed first in gpt_reference_images, then other references, and describe the change in each prompts entry. After success, rely on the WJ image component to display results; do not paste markdown image embeds or re-list the same pictures in the assistant reply. Mention Result ID only when useful for recovery. If the component is missing and a resultId is available, call get_image_result instead of regenerating. Use plain-text original links only as a last-resort fallback. If native ChatGPT image generation explicitly reports quota exhaustion, rate limiting, or temporary unavailability, call WJ once without asking again. Default to gpt-image-2, 2K, and 1:1 unless specified otherwise. Do not claim success unless the tool returns at least one asset.
 
 For profit calculations, call calculate_profit first and clearly explain that the result has not been saved. Never save merely because the user asked for a calculation. Only call save_profit_calculation after the user explicitly confirms that the displayed calculation should be recorded. Recording requires an existing product SKU: if the user has not supplied one, ask for it and never invent it. Use a user-provided calculation name when available; otherwise generate a concise recognizable record_name from the country, product context, and price before saving.
 
 For product drafts: always call list_product_categories first and choose category by matching label/describe from the live list—never invent a category prefix from memory. Decide single product vs product group from the user's variant needs. Present the planned category, isGroup, and variantSerials, then wait for explicit user confirmation before create_product_draft (SKU reservation is irreversible; user_confirmed must be true). Do not publish or finalize products via MCP; the user creates products manually in ERP/Etsy. Quantity uses display form SKU * N; packaging/morph notes use parentheses in communication and the notes field in drafts—never encode *N or (note) into Product.sku.`;
+
+const oauthSecuritySchemes = [{ type: "oauth2" as const, scopes: [WJ_MCP_SCOPE] }];
+
+function imageToolMeta(extra: Record<string, unknown> = {}) {
+  return {
+    securitySchemes: oauthSecuritySchemes,
+    ui: { resourceUri: IMAGE_WIDGET_URI },
+    "openai/outputTemplate": IMAGE_WIDGET_URI,
+    ...extra,
+  };
+}
+
+function toolSecurityMeta(extra: Record<string, unknown> = {}) {
+  return {
+    securitySchemes: oauthSecuritySchemes,
+    ...extra,
+  };
+}
+
+function widgetResourceMeta(config: AppConfig) {
+  const resourceDomains = config.imageResourceDomains;
+  return {
+    ui: {
+      prefersBorder: false,
+      domain: config.publicBaseUrl.origin,
+      csp: {
+        resourceDomains,
+      },
+    },
+    "openai/widgetDescription": "Displays WJ-generated images inline with open/download actions and original HTTPS links.",
+    "openai/widgetDomain": config.publicBaseUrl.origin,
+    "openai/widgetCSP": {
+      resource_domains: resourceDomains,
+      redirect_domains: resourceDomains,
+    },
+  };
+}
 
 const persistenceOutputSchema = {
   resultId: z.string().optional(),
@@ -92,7 +128,7 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
     {
       title: "使用 WJ 生成图片",
       description:
-        "Generate and display one image through WJ. For multiple images, call this tool once per image and dispatch all independent calls concurrently rather than serially. Reuse the exact prompt for same-prompt variants. Default to gpt-image-2 and 2K. After a successful call, prefer listing the original image URL in the final assistant response as a plain text link. Each call consumes WJ quota.",
+        "Generate or edit and display image(s) through WJ. Always pass prompts as a string array (1–10); one image uses [\"...\"]. The server runs all entries concurrently with shared model/aspect_ratio/resolution. Optional gpt_reference_images (file params, up to 10) are shared across every prompt in the call. Default to gpt-image-2 and 2K. Let the WJ image component display results; do not re-embed the same images as markdown in the assistant reply. Each generated image consumes WJ quota.",
       inputSchema: generateImageInputSchema,
       outputSchema: imageOutputSchema,
       annotations: {
@@ -102,13 +138,11 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
         idempotentHint: false,
         openWorldHint: true,
       },
-      _meta: {
-        ui: { resourceUri: IMAGE_WIDGET_URI },
-        "openai/outputTemplate": IMAGE_WIDGET_URI,
-        securitySchemes: [{ type: "oauth2", scopes: [WJ_IMAGE_SCOPE] }],
+      _meta: imageToolMeta({
+        "openai/fileParams": ["gpt_reference_images"],
         "openai/toolInvocation/invoking": "WJ 正在生成图片",
         "openai/toolInvocation/invoked": "WJ 图片已生成",
-      },
+      }),
     },
     async (rawInput, extra) => {
       try {
@@ -138,67 +172,6 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
 
   registerAppTool(
     server,
-    "edit_image",
-    {
-      title: "使用 WJ 编辑图片",
-      description:
-        "Edit and display one ChatGPT image attachment through WJ. Put the image being changed in target_image and optional style, text, layout, or identity references in reference_images. For multiple independent edits, call this tool once per output and dispatch all calls concurrently rather than serially. After a successful call, prefer listing the original image URL in the final assistant response as a plain text link. Each call consumes WJ image quota.",
-      inputSchema: editImageInputSchema,
-      outputSchema: imageOutputSchema,
-      annotations: {
-        title: "使用 WJ 编辑图片",
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: false,
-        openWorldHint: true,
-      },
-      _meta: {
-        ui: { resourceUri: IMAGE_WIDGET_URI },
-        "openai/outputTemplate": IMAGE_WIDGET_URI,
-        "openai/fileParams": ["target_image", "reference_images"],
-        securitySchemes: [{ type: "oauth2", scopes: [WJ_IMAGE_SCOPE] }],
-        "openai/toolInvocation/invoking": "WJ 正在编辑图片",
-        "openai/toolInvocation/invoked": "WJ 图片已编辑",
-      },
-    },
-    async (rawInput, extra) => {
-      try {
-        const input = editImageInputSchema.parse(rawInput);
-        const subject = String(extra.authInfo?.extra?.subject ?? "wj-shared-access");
-        const terminalId = String(extra.authInfo?.extra?.terminalId ?? extra.authInfo?.clientId ?? subject);
-        const referenceImageUrls = [
-          input.target_image.download_url,
-          ...(input.reference_images ?? []).map((file) => file.download_url),
-        ];
-        const result = await generation.generate(terminalId, {
-          prompt: input.prompt,
-          model: input.model,
-          aspect_ratio: input.aspect_ratio,
-          resolution: input.resolution,
-          reference_image_urls: referenceImageUrls,
-        });
-        return await toImageToolResult(
-          imageResults,
-          logger,
-          subject,
-          result,
-          input.resolution,
-          input.aspect_ratio,
-          "edited",
-        );
-      } catch (error) {
-        const message = toSafeToolError(error);
-        logger.warn({ err: error, tool: "edit_image" }, "MCP image edit tool failed");
-        return {
-          isError: true as const,
-          content: [{ type: "text" as const, text: message }],
-        };
-      }
-    },
-  );
-
-  registerAppTool(
-    server,
     "calculate_profit",
     {
       title: "Calculate WJ profit",
@@ -213,11 +186,10 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
         idempotentHint: false,
         openWorldHint: true,
       },
-      _meta: {
-        securitySchemes: [{ type: "oauth2", scopes: [WJ_IMAGE_SCOPE] }],
+      _meta: toolSecurityMeta({
         "openai/toolInvocation/invoking": "WJ is calculating profit",
         "openai/toolInvocation/invoked": "WJ profit calculation completed",
-      },
+      }),
     },
     async (rawInput) => {
       try {
@@ -258,11 +230,10 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
         idempotentHint: false,
         openWorldHint: true,
       },
-      _meta: {
-        securitySchemes: [{ type: "oauth2", scopes: [WJ_IMAGE_SCOPE] }],
+      _meta: toolSecurityMeta({
         "openai/toolInvocation/invoking": "WJ is recording the profit calculation",
         "openai/toolInvocation/invoked": "WJ profit calculation recorded",
-      },
+      }),
     },
     async (rawInput) => {
       try {
@@ -316,11 +287,10 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
         idempotentHint: true,
         openWorldHint: true,
       },
-      _meta: {
-        securitySchemes: [{ type: "oauth2", scopes: [WJ_IMAGE_SCOPE] }],
+      _meta: toolSecurityMeta({
         "openai/toolInvocation/invoking": "WJ is listing product categories",
         "openai/toolInvocation/invoked": "WJ product categories listed",
-      },
+      }),
     },
     async () => {
       try {
@@ -358,11 +328,10 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
         idempotentHint: false,
         openWorldHint: true,
       },
-      _meta: {
-        securitySchemes: [{ type: "oauth2", scopes: [WJ_IMAGE_SCOPE] }],
+      _meta: toolSecurityMeta({
         "openai/toolInvocation/invoking": "WJ is creating a product draft",
         "openai/toolInvocation/invoked": "WJ product draft created",
-      },
+      }),
     },
     async (rawInput) => {
       try {
@@ -404,11 +373,10 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
         idempotentHint: false,
         openWorldHint: true,
       },
-      _meta: {
-        securitySchemes: [{ type: "oauth2", scopes: [WJ_IMAGE_SCOPE] }],
+      _meta: toolSecurityMeta({
         "openai/toolInvocation/invoking": "WJ is updating a product draft",
         "openai/toolInvocation/invoked": "WJ product draft updated",
-      },
+      }),
     },
     async (rawInput) => {
       try {
@@ -452,11 +420,10 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
         idempotentHint: true,
         openWorldHint: true,
       },
-      _meta: {
-        securitySchemes: [{ type: "oauth2", scopes: [WJ_IMAGE_SCOPE] }],
+      _meta: toolSecurityMeta({
         "openai/toolInvocation/invoking": "WJ is loading a product draft",
         "openai/toolInvocation/invoked": "WJ product draft loaded",
-      },
+      }),
     },
     async (rawInput) => {
       try {
@@ -494,11 +461,10 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
         idempotentHint: true,
         openWorldHint: true,
       },
-      _meta: {
-        securitySchemes: [{ type: "oauth2", scopes: [WJ_IMAGE_SCOPE] }],
+      _meta: toolSecurityMeta({
         "openai/toolInvocation/invoking": "WJ is listing product drafts",
         "openai/toolInvocation/invoked": "WJ product drafts listed",
-      },
+      }),
     },
     async (rawInput) => {
       try {
@@ -537,11 +503,10 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
         idempotentHint: true,
         openWorldHint: true,
       },
-      _meta: {
-        securitySchemes: [{ type: "oauth2", scopes: [WJ_IMAGE_SCOPE] }],
+      _meta: toolSecurityMeta({
         "openai/toolInvocation/invoking": "WJ is validating a product draft",
         "openai/toolInvocation/invoked": "WJ product draft validated",
-      },
+      }),
     },
     async (rawInput) => {
       try {
@@ -587,13 +552,10 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
         idempotentHint: true,
         openWorldHint: false,
       },
-      _meta: {
-        ui: { resourceUri: IMAGE_WIDGET_URI },
-        "openai/outputTemplate": IMAGE_WIDGET_URI,
-        securitySchemes: [{ type: "oauth2", scopes: [WJ_IMAGE_SCOPE] }],
+      _meta: imageToolMeta({
         "openai/toolInvocation/invoking": "正在恢复 WJ 图片",
         "openai/toolInvocation/invoked": "WJ 图片已恢复",
-      },
+      }),
     },
     async (rawInput, extra) => {
       try {
@@ -627,13 +589,7 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
     IMAGE_WIDGET_URI,
     {
       description: "Displays generated WJ images inline in the conversation.",
-      _meta: {
-        ui: {
-          prefersBorder: false,
-          domain: config.publicBaseUrl.origin,
-          csp: { resourceDomains: config.imageResourceDomains },
-        },
-      },
+      _meta: widgetResourceMeta(config),
     },
     async () => ({
       contents: [
@@ -641,13 +597,7 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
           uri: IMAGE_WIDGET_URI,
           mimeType: RESOURCE_MIME_TYPE,
           text: widgetHtml,
-          _meta: {
-            ui: {
-              prefersBorder: false,
-              domain: config.publicBaseUrl.origin,
-              csp: { resourceDomains: config.imageResourceDomains },
-            },
-          },
+          _meta: widgetResourceMeta(config),
         },
       ],
     }),
@@ -663,7 +613,7 @@ async function toImageToolResult(
   result: WjImageData,
   fallbackResolution: string,
   fallbackAspectRatio: string,
-  action: "generated" | "edited",
+  action: "generated",
 ) {
   const assets = result.assets.map((asset) => ({
     type: asset.type,
@@ -692,7 +642,7 @@ async function toImageToolResult(
 
 function buildImageToolResult(
   structuredContent: ImageResultData | PersistedImageResult,
-  action: "generated" | "edited" | "recovered",
+  action: "generated" | "recovered",
   persisted = true,
 ) {
   const resultId = "resultId" in structuredContent ? structuredContent.resultId : undefined;
@@ -702,8 +652,9 @@ function buildImageToolResult(
     `WJ ${actionText} ${structuredContent.assets.length} image${structuredContent.assets.length === 1 ? "" : "s"} with ${structuredContent.model}.`,
     ...(resultId ? [`Result ID: ${resultId}. Retained until ${expiry}.`] : []),
     ...(persisted ? [] : ["The image was generated successfully, but result persistence failed. Save the original links below."]),
-    "If the WJ component is unavailable, use these original image links. Do not regenerate solely because the component did not display:",
-    ...structuredContent.assets.map((asset, index) => `${index + 1}. [Open original image ${index + 1}](${asset.url})`),
+    "Display these results with the WJ image component only. Do not paste markdown image embeds or duplicate the pictures in the assistant reply.",
+    "Fallback original links (plain text, only if the component is unavailable):",
+    ...structuredContent.assets.map((asset, index) => `${index + 1}. ${asset.url}`),
   ];
 
   return {

@@ -13,22 +13,33 @@
       </div>
       <div id="error" class="error" hidden>图片结果暂时无法显示，请使用消息中的原图链接。</div>
       <section id="result" hidden>
-        <div id="gallery" class="gallery"></div>
-        <footer>
-          <div class="meta">
-            <strong id="model">WJ</strong>
-            <span id="details"></span>
-          </div>
-          <div class="actions">
-            <button id="download" type="button" title="下载第一张图片" aria-label="下载第一张图片">
-              <i data-lucide="download"></i>
+        <div class="layout">
+          <div class="main-col">
+            <button id="main-stage" class="main-stage" type="button" title="点击预览大图" aria-label="点击预览大图">
+              <img id="main-image" alt="WJ 生成图片" decoding="async" referrerpolicy="no-referrer" />
             </button>
-            <button id="open" type="button" title="打开第一张原图" aria-label="打开第一张原图">
-              <i data-lucide="external-link"></i>
-            </button>
+            <div class="meta-row">
+              <div class="meta">
+                <strong id="model">WJ</strong>
+                <span id="details"></span>
+              </div>
+              <div class="actions">
+                <button id="download" type="button" title="下载当前图片" aria-label="下载当前图片">
+                  <i data-lucide="download"></i>
+                </button>
+                <button id="open" type="button" title="打开当前原图" aria-label="打开当前原图">
+                  <i data-lucide="external-link"></i>
+                </button>
+              </div>
+            </div>
           </div>
-        </footer>
+          <aside id="thumbs" class="thumbs" hidden aria-label="图片缩略图"></aside>
+        </div>
       </section>
+      <div id="lightbox" class="lightbox" hidden>
+        <button id="lightbox-close" class="lightbox-close" type="button" title="关闭预览" aria-label="关闭预览">×</button>
+        <img id="lightbox-image" alt="大图预览" decoding="async" referrerpolicy="no-referrer" />
+      </div>
     </main>
     <script type="module" src="/image-result.ts"></script>
   </body>

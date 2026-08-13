@@ -9,6 +9,7 @@ import {
   getImageResultIdKey,
   getImageResultKey,
   imageResultMatchesBinding,
+  type ImageAsset,
   type ImageResult,
 } from "./image-result-state.js";
 import "./styles.css";
@@ -30,13 +31,21 @@ const app = new App({ name: "WJ image result", version: APP_VERSION }, {});
 const loading = requiredElement<HTMLDivElement>("loading");
 const errorBox = requiredElement<HTMLDivElement>("error");
 const result = requiredElement<HTMLElement>("result");
-const gallery = requiredElement<HTMLDivElement>("gallery");
+const thumbs = requiredElement<HTMLElement>("thumbs");
+const mainStage = requiredElement<HTMLButtonElement>("main-stage");
+const mainImage = requiredElement<HTMLImageElement>("main-image");
 const model = requiredElement<HTMLElement>("model");
 const details = requiredElement<HTMLSpanElement>("details");
 const openButton = requiredElement<HTMLButtonElement>("open");
 const downloadButton = requiredElement<HTMLButtonElement>("download");
+const lightbox = requiredElement<HTMLDivElement>("lightbox");
+const lightboxImage = requiredElement<HTMLImageElement>("lightbox-image");
+const lightboxClose = requiredElement<HTMLButtonElement>("lightbox-close");
 let current: ImageResult | undefined;
+let activeIndex = 0;
 let boundResultKey: string | undefined;
+let renderedResultKey: string | undefined;
+let persistedResultKey: string | undefined;
 let recoveryInFlight: Promise<void> | undefined;
 let compatibilityRestoreTimer: number | undefined;
 
@@ -56,21 +65,42 @@ app.addEventListener("toolresult", (params) => {
 
 app.onhostcontextchanged = applyHostContext;
 
+mainStage.addEventListener("click", () => {
+  const asset = currentAsset();
+  if (asset) openLightbox(asset);
+});
+
+lightbox.addEventListener("click", (event) => {
+  if (event.target === lightbox || event.target === lightboxClose) closeLightbox();
+});
+
+lightboxClose.addEventListener("click", closeLightbox);
+
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !lightbox.hidden) {
+    closeLightbox();
+    return;
+  }
+  if (!current || current.assets.length < 2) return;
+  if (event.key === "ArrowLeft") showIndex(activeIndex - 1);
+  if (event.key === "ArrowRight") showIndex(activeIndex + 1);
+});
+
 openButton.addEventListener("click", async () => {
-  const url = current?.assets[0]?.url;
+  const url = currentAsset()?.url;
   if (url) await app.openLink({ url });
 });
 
 downloadButton.addEventListener("click", async () => {
-  const asset = current?.assets[0];
+  const asset = currentAsset();
   if (!asset) return;
   await app.downloadFile({
     contents: [
       {
         type: "resource_link",
         uri: asset.url,
-        name: "wj-generated-image",
-        title: "WJ 生成图片",
+        name: `wj-generated-image-${activeIndex + 1}`,
+        title: `WJ 生成图片 ${activeIndex + 1}`,
         mimeType: asset.mime_type ?? "image/png",
       },
     ],
@@ -108,15 +138,17 @@ async function recoverFromResultId(resultId: string | undefined): Promise<void> 
   cancelCompatibilityRestore();
   recoveryInFlight = (async () => {
     try {
+      if (current) return;
       const restored = await app.callServerTool({
         name: "get_image_result",
         arguments: { result_id: resultId },
       });
+      if (current) return;
       const imageResult = getImageResult(restored);
       if (imageResult && bindImageResult(imageResult)) render(imageResult, true);
-      else showResultUnavailable();
+      else if (!current) showResultUnavailable();
     } catch {
-      showResultUnavailable();
+      if (!current) showResultUnavailable();
     } finally {
       recoveryInFlight = undefined;
     }
@@ -125,32 +157,81 @@ async function recoverFromResultId(resultId: string | undefined): Promise<void> 
 }
 
 function render(data: ImageResult, persist: boolean): void {
-  const isSameResult = current !== undefined && getImageResultKey(current) === getImageResultKey(data);
+  const resultKey = getImageResultKey(data);
   current = data;
-  if (isSameResult) {
-    updateMetadata(data);
-    if (persist) window.openai?.setWidgetState?.(createPersistedImageState(data));
+
+  if (renderedResultKey === resultKey) {
+    updateChrome(data);
+    maybePersist(data, persist, resultKey);
     return;
   }
 
-  gallery.replaceChildren();
+  renderedResultKey = resultKey;
+  activeIndex = 0;
+  thumbs.replaceChildren();
 
-  for (const [index, asset] of data.assets.entries()) {
-    const image = document.createElement("img");
-    image.src = asset.url;
-    image.alt = `WJ 生成图片 ${index + 1}`;
-    image.loading = index === 0 ? "eager" : "lazy";
-    image.decoding = "async";
-    image.referrerPolicy = "no-referrer";
-    if (asset.width) image.width = asset.width;
-    if (asset.height) image.height = asset.height;
-    image.addEventListener("error", () => showImageLoadError(image), { once: true });
-    gallery.append(image);
+  const multi = data.assets.length > 1;
+  thumbs.hidden = !multi;
+
+  if (multi) {
+    for (const [index, asset] of data.assets.entries()) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "thumb";
+      button.title = `切换到第 ${index + 1} 张`;
+      button.setAttribute("aria-label", `切换到第 ${index + 1} 张`);
+      const image = document.createElement("img");
+      image.src = asset.url;
+      image.alt = `缩略图 ${index + 1}`;
+      image.loading = index === 0 ? "eager" : "lazy";
+      image.decoding = "async";
+      image.referrerPolicy = "no-referrer";
+      button.append(image);
+      button.addEventListener("click", () => showIndex(index));
+      thumbs.append(button);
+    }
   }
 
-  updateMetadata(data);
+  showIndex(0);
+  updateChrome(data);
+  maybePersist(data, persist, resultKey);
+}
 
-  if (persist) window.openai?.setWidgetState?.(createPersistedImageState(data));
+function showIndex(nextIndex: number): void {
+  if (!current?.assets.length) return;
+  const total = current.assets.length;
+  activeIndex = ((nextIndex % total) + total) % total;
+  const asset = current.assets[activeIndex]!;
+  mainImage.src = asset.url;
+  mainImage.alt = `WJ 生成图片 ${activeIndex + 1}`;
+  if (asset.width) mainImage.width = asset.width;
+  else mainImage.removeAttribute("width");
+  if (asset.height) mainImage.height = asset.height;
+  else mainImage.removeAttribute("height");
+
+  thumbs.querySelectorAll(".thumb").forEach((node, index) => {
+    node.classList.toggle("is-active", index === activeIndex);
+  });
+
+  updateChrome(current);
+  if (!lightbox.hidden) openLightbox(asset);
+}
+
+function openLightbox(asset: ImageAsset): void {
+  lightboxImage.src = asset.url;
+  lightboxImage.alt = `大图预览 ${activeIndex + 1}`;
+  lightbox.hidden = false;
+}
+
+function closeLightbox(): void {
+  lightbox.hidden = true;
+  lightboxImage.removeAttribute("src");
+}
+
+function maybePersist(data: ImageResult, persist: boolean, resultKey: string): void {
+  if (!persist || persistedResultKey === resultKey) return;
+  persistedResultKey = resultKey;
+  window.openai?.setWidgetState?.(createPersistedImageState(data));
 }
 
 function bindImageResult(imageResult: ImageResult): boolean {
@@ -187,26 +268,31 @@ function cancelCompatibilityRestore(): void {
   compatibilityRestoreTimer = undefined;
 }
 
-function updateMetadata(data: ImageResult): void {
+function updateChrome(data: ImageResult): void {
+  const total = data.assets.length;
+  const asset = data.assets[activeIndex];
   model.textContent = data.model;
-  details.textContent = [data.resolution, data.aspectRatio, formatDuration(data.durationMs)].filter(Boolean).join(" · ");
+  details.textContent = [
+    data.resolution,
+    data.aspectRatio,
+    total > 1 ? `${activeIndex + 1}/${total}` : undefined,
+    asset?.width && asset?.height ? `${asset.width}×${asset.height}` : undefined,
+    formatDuration(data.durationMs),
+  ].filter(Boolean).join(" · ");
   loading.hidden = true;
   errorBox.hidden = true;
   result.hidden = false;
 }
 
+function currentAsset() {
+  return current?.assets[activeIndex];
+}
+
 function showResultUnavailable(): void {
   loading.hidden = true;
   result.hidden = true;
+  closeLightbox();
   errorBox.textContent = "图片结果暂时无法恢复，请使用消息中的原图链接。";
-  errorBox.hidden = false;
-}
-
-function showImageLoadError(image: HTMLImageElement): void {
-  image.hidden = true;
-  loading.hidden = true;
-  result.hidden = false;
-  errorBox.textContent = "图片加载失败，你仍可使用下方的“打开原图”按钮。";
   errorBox.hidden = false;
 }
 
@@ -217,7 +303,7 @@ function applyHostContext(context: ReturnType<App["getHostContext"]>): void {
 
 function formatDuration(durationMs?: number): string | undefined {
   if (durationMs === undefined) return undefined;
-  return `${(durationMs / 1000).toFixed(durationMs >= 10_000 ? 0 : 1)}s`;
+  return `耗时 ${(durationMs / 1000).toFixed(durationMs >= 10_000 ? 0 : 1)}s`;
 }
 
 function requiredElement<T extends HTMLElement>(id: string): T {

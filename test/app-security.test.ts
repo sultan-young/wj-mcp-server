@@ -35,7 +35,7 @@ describe("HTTP security and discovery", () => {
     expect(rootProtectedMetadata.body).toEqual(expect.objectContaining({
       resource: "http://127.0.0.1:6070/mcp",
       authorization_servers: ["http://127.0.0.1:6070"],
-      scopes_supported: ["wj:image"],
+      scopes_supported: expect.arrayContaining(["wj:tools", "wj:image"]),
     }));
 
     const protectedMetadata = await request(app)
@@ -45,7 +45,7 @@ describe("HTTP security and discovery", () => {
     expect(protectedMetadata.body).toEqual(expect.objectContaining({
       resource: "http://127.0.0.1:6070/mcp",
       authorization_servers: ["http://127.0.0.1:6070"],
-      scopes_supported: ["wj:image"],
+      scopes_supported: expect.arrayContaining(["wj:tools", "wj:image"]),
     }));
 
     const oauthMetadata = await request(app)
@@ -56,7 +56,7 @@ describe("HTTP security and discovery", () => {
       issuer: "http://127.0.0.1:6070",
       registration_endpoint: "http://127.0.0.1:6070/reg",
       code_challenge_methods_supported: ["S256"],
-      scopes_supported: ["openid", "offline_access", "wj:image"],
+      scopes_supported: expect.arrayContaining(["openid", "offline_access", "wj:tools", "wj:image"]),
     }));
   });
 });

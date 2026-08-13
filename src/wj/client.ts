@@ -26,7 +26,7 @@ import {
   type ValidateProductDraftInput,
   validateProductDraftResultSchema,
 } from "./product-draft-types.js";
-import { type GenerateImageInput, type WjImageData, wjImageResponseSchema } from "./types.js";
+import { type WjGenerateImageRequest, type WjImageData, resolveGenerateReferenceUrls, wjImageResponseSchema } from "./types.js";
 import { z } from "zod";
 
 export class WjApiError extends Error {
@@ -46,16 +46,17 @@ export class WjClient {
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
-  async generateImage(input: GenerateImageInput): Promise<WjImageData> {
+  async generateImage(input: WjGenerateImageRequest): Promise<WjImageData> {
     if (!this.config.WJ_ALLOWED_MODELS.includes(input.model)) {
       throw new WjApiError(`Model ${input.model} is not allowed`);
     }
 
     const endpoint = new URL(this.config.WJ_IMAGE_PATH, this.config.wjApiBaseUrl);
+    const inputImages = resolveGenerateReferenceUrls(input);
     const requestBody = {
       model: input.model,
       prompt: input.prompt,
-      ...(input.reference_image_urls?.length ? { input_images: input.reference_image_urls } : {}),
+      ...(inputImages?.length ? { input_images: inputImages } : {}),
       output: {
         aspect_ratio: input.aspect_ratio,
         resolution: input.resolution,

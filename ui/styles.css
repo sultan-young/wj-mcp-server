@@ -33,36 +33,100 @@ main {
   display: none !important;
 }
 
-.gallery {
+.layout {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.main-col {
+  min-width: 0;
+  display: grid;
   gap: 8px;
 }
 
-.gallery img {
+.main-stage {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.main-stage:focus-visible {
+  outline: 2px solid var(--color-ring-primary, #16845d);
+  outline-offset: 2px;
+}
+
+#main-image {
   display: block;
   width: 100%;
   height: auto;
-  max-height: 760px;
+  max-height: min(72vh, 760px);
   object-fit: contain;
-  border-radius: 6px;
   background: var(--color-background-secondary, #eef2ef);
+  border-radius: 14px;
 }
 
-footer {
-  min-height: 48px;
+.thumbs {
+  width: 72px;
+  max-height: min(72vh, 760px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 2px;
+  scrollbar-width: thin;
+}
+
+.thumb {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--color-background-secondary, #eef2ef);
+  cursor: pointer;
+}
+
+.thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.thumb.is-active {
+  border-color: var(--color-ring-primary, #16845d);
+}
+
+.thumb:focus-visible {
+  outline: 2px solid var(--color-ring-primary, #16845d);
+  outline-offset: 1px;
+}
+
+.meta-row {
+  min-height: 40px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 2px 0;
+  padding: 0 2px;
 }
 
 .meta {
   min-width: 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
+  gap: 6px 10px;
   font-size: 13px;
 }
 
@@ -72,7 +136,6 @@ footer {
 
 .meta span {
   color: var(--color-text-secondary, #66736d);
-  white-space: nowrap;
 }
 
 .actions {
@@ -81,7 +144,9 @@ footer {
   gap: 4px;
 }
 
-button {
+button.action,
+#download,
+#open {
   width: 36px;
   height: 36px;
   display: grid;
@@ -93,19 +158,60 @@ button {
   cursor: pointer;
 }
 
-button:hover {
+#download:hover,
+#open:hover {
   background: var(--color-background-secondary, #eef2ef);
 }
 
-button:focus-visible {
+#download:focus-visible,
+#open:focus-visible {
   outline: 2px solid var(--color-ring-primary, #16845d);
   outline-offset: 2px;
 }
 
-button svg {
+#download svg,
+#open svg {
   width: 18px;
   height: 18px;
   stroke-width: 1.8;
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(8, 12, 10, 0.78);
+  cursor: zoom-out;
+}
+
+.lightbox[hidden] {
+  display: none !important;
+}
+
+.lightbox img {
+  max-width: min(96vw, 1400px);
+  max-height: 92vh;
+  object-fit: contain;
+  border-radius: 12px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+}
+
+.lightbox-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 999px;
+  font-size: 28px;
+  line-height: 1;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+  cursor: pointer;
 }
 
 .loading,
@@ -122,7 +228,7 @@ button svg {
   width: 100%;
   aspect-ratio: 16 / 9;
   max-height: 420px;
-  border-radius: 6px;
+  border-radius: 14px;
   background: linear-gradient(100deg, #edf1ef 20%, #f7f9f8 45%, #edf1ef 70%);
   background-size: 220% 100%;
   animation: loading 1.5s linear infinite;
@@ -147,14 +253,28 @@ button svg {
   }
 }
 
-@media (max-width: 420px) {
-  footer {
-    align-items: flex-start;
+@media (max-width: 520px) {
+  .layout {
+    grid-template-columns: 1fr;
   }
 
-  .meta {
-    display: grid;
-    gap: 2px;
+  .thumbs {
+    width: 100%;
+    max-height: none;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-right: 0;
+    padding-bottom: 2px;
+  }
+
+  .thumb {
+    width: 56px;
+    height: 56px;
+  }
+
+  .meta-row {
+    align-items: flex-start;
   }
 }
 

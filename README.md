@@ -5,18 +5,20 @@
 ## 已实现
 
 - 标准 MCP Streamable HTTP 端点：`POST /mcp`
-- 图片创作能力只有 `generate_image` 和 `edit_image`，另提供只读的 `get_image_result` 结果恢复工具
-- 利润能力包含只读的 `calculate_profit` 和需要用户明确确认的 `save_profit_calculation`
-- 商品草稿：`list_product_categories`、确认后 `create_product_draft`（立即占号）、`update/get/list/validate_product_draft`；**不含 publish**（正式创建由 ERP/Etsy 人工完成）
+- 图片：`generate_image`（必填 `prompts` 数组并发生成，可带共享 `gpt_reference_images`）、`get_image_result`（按 resultId 恢复结果，只读）
+- `generate_image` 通过 `gpt_reference_images`（`openai/fileParams`，最多 10 张）接收 ChatGPT 附件，并与本次 `prompts` 每一项共享；编辑时按附件顺序传入并由对应提示词说明改法
+- OAuth scope：`wj:tools`（同时仍接受已有 `wj:image` 令牌）
+- 利润：`calculate_profit`（试算）、`save_profit_calculation`（确认后录入）
+- 商品草稿：`list_product_categories`、`create_product_draft`（需确认，立即占号）、`update/get/list/validate_product_draft`
 - Skill：`skills/wj-product-draft/SKILL.md`（品类以接口为准、创建前确认、SKU 规则）
 - 部署前在 WJ-SREVER 执行 `node scripts/seed_open_platform.js`，确保 MCP 用的 Key 具备 `openApi.productDraft`（对已有利润试算授权的 Key 会自动补授）
 - 试算不要求 SKU；录入必须提供商品池中真实存在的 SKU，并由 WJ 服务端重新计算后保存
 - 录入名称在前端为可选字段；通过 MCP 录入时由 GPT 使用用户名称或自动生成简短名称
-- 每次工具调用只生成或编辑一张图；用户要求多图时，ChatGPT 应同时发起多个独立工具调用
-- 每次成功结果保存到 Redis 30 天，GPT 或图片组件都可通过 `get_image_result` 无额度恢复
+- `generate_image` 始终使用 `prompts`（1–10 项）；服务端按 `IMAGE_MAX_CONCURRENCY` 并发生成
+- 每次成功结果保存到 Redis 30 天，可通过 `get_image_result` 无额度恢复
 - 工具文本同时返回原图链接，Widget 不可用时仍能打开结果
-- 支持 `nano-banana-2`、常用宽高比、`1K/2K/4K` 和参考图 URL
-- MCP Apps 图片组件，在支持的 ChatGPT 客户端中直接显示图片
+- 支持 `nano-banana-2`、常用宽高比、`1K/2K/4K` 和 ChatGPT 附件参考图
+- MCP Apps 图片组件：左侧主图（可点预览）、右侧缩略图切换，下方展示分辨率/耗时等元信息
 - 不支持组件的客户端仍会收到 Markdown 图片和原图链接
 - OAuth 2.1 授权码流程、PKCE、动态客户端注册和刷新令牌
 - Redis 持久化 OAuth 数据、分钟/每日限额和登录防爆破
@@ -104,7 +106,7 @@ curl https://mcp.wj.zaowuwujie.ltd/.well-known/oauth-protected-resource/mcp
 
 利润试算应先调用 `calculate_profit` 并向用户展示结果。只有用户明确确认录入后，才调用 `save_profit_calculation`；缺少 SKU 时必须先询问用户，不能虚构 SKU。部署前还需要在 WJ 开放平台为 `WJ_API_KEY` 对应凭证授予利润试算和利润录入接口能力。
 
-生成多张图片时，ChatGPT 应为每张图片分别调用一次 `generate_image`，并在同一个工具调用轮次中并发发出，不能等待上一张完成后再开始下一张。同提示词变体在每次调用中复用相同提示词，不同图片则分别保留各自提示词。服务端通过 `IMAGE_MAX_CONCURRENCY` 限制每个 OAuth 插件终端实际同时请求 WJ 的数量，默认每个终端 10 个；不同终端使用彼此独立的并发队列。
+生成图片时始终传入 `prompts` 字符串数组（1–10 项；单张为一项）。服务端按 `IMAGE_MAX_CONCURRENCY` 并发生成，默认每个 OAuth 终端最多同时 10 个 WJ 请求，不同终端队列彼此独立。同提示词变体在 `prompts` 中重复相同文案；不同图写入不同提示词。可选的 `gpt_reference_images` 与本次所有 `prompts` 条目共享。
 
 每次成功调用都会返回 `resultId`、`expiresAt` 和原图链接。结果默认在 Redis 中保存 30 天；如果 ChatGPT 的图片组件没有拿到完整结果，组件会自动调用 `get_image_result`，GPT 也可以根据 `resultId` 主动调用该工具并重新展示图片。模型仍可使用返回文本中的原图链接，不能因为组件没有显示而重新生成。恢复操作不会请求 WJ，也不会消耗图片额度。
 

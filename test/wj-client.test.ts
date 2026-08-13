@@ -69,9 +69,15 @@ describe("WjClient", () => {
       prompt: "Copy the name from image two onto image one",
       aspect_ratio: "1:1",
       resolution: "1K",
-      reference_image_urls: [
-        "https://files.openai.example/target.png?signature=one",
-        "https://files.openai.example/reference.png?signature=two",
+      gpt_reference_images: [
+        {
+          download_url: "https://files.openai.example/target.png?signature=one",
+          file_id: "file_target",
+        },
+        {
+          download_url: "https://files.openai.example/reference.png?signature=two",
+          file_id: "file_reference",
+        },
       ],
     });
 

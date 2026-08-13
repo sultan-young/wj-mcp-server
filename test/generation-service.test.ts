@@ -2,14 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import { GenerationService } from "../src/generation-service.js";
 import type { WjClient } from "../src/wj/client.js";
-import type { GenerateImageInput } from "../src/wj/types.js";
+import type { GenerateImageInput, WjGenerateImageRequest } from "../src/wj/types.js";
 import { testConfig } from "./helpers.js";
 
 describe("GenerationService", () => {
   it("runs independent image requests concurrently up to the configured limit", async () => {
     let active = 0;
     let maximumActive = 0;
-    const generateImage = vi.fn(async (input: GenerateImageInput) => {
+    const generateImage = vi.fn(async (input: WjGenerateImageRequest) => {
       active += 1;
       maximumActive = Math.max(maximumActive, active);
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -30,7 +30,7 @@ describe("GenerationService", () => {
       testConfig({ IMAGE_MAX_CONCURRENCY: "2" }),
     );
     const request = (index: number): GenerateImageInput => ({
-      prompt: `image-${index}`,
+      prompts: [`image-${index}`],
       model: "gpt-image-2",
       aspect_ratio: "1:1",
       resolution: "2K",
@@ -47,7 +47,7 @@ describe("GenerationService", () => {
     let maximumTotal = 0;
     const activeByTerminal = new Map<string, number>();
     const maximumByTerminal = new Map<string, number>();
-    const generateImage = vi.fn(async (input: GenerateImageInput) => {
+    const generateImage = vi.fn(async (input: WjGenerateImageRequest) => {
       const terminalId = input.prompt.split(":", 1)[0]!;
       const activeForTerminal = (activeByTerminal.get(terminalId) ?? 0) + 1;
       activeByTerminal.set(terminalId, activeForTerminal);
@@ -69,7 +69,7 @@ describe("GenerationService", () => {
       testConfig({ IMAGE_MAX_CONCURRENCY: "2" }),
     );
     const request = (terminalId: string, index: number): GenerateImageInput => ({
-      prompt: `${terminalId}:${index}`,
+      prompts: [`${terminalId}:${index}`],
       model: "gpt-image-2",
       aspect_ratio: "1:1",
       resolution: "2K",
@@ -83,5 +83,89 @@ describe("GenerationService", () => {
     expect(maximumByTerminal.get("terminal-a")).toBe(2);
     expect(maximumByTerminal.get("terminal-b")).toBe(2);
     expect(maximumTotal).toBe(4);
+  });
+
+  it("forwards ChatGPT gpt_reference_images download URLs to WJ", async () => {
+    const generateImage = vi.fn().mockResolvedValue({
+      model_id: "gpt-image-2",
+      resolution: "2K",
+      aspect_ratio: "1:1",
+      assets: [{ type: "image", mime_type: "image/png", url: "https://img.downk.cc/out.png" }],
+    });
+    const service = new GenerationService(
+      { generateImage } as unknown as WjClient,
+      testConfig(),
+    );
+
+    await service.generate("terminal", {
+      prompts: ["combine refs"],
+      model: "gpt-image-2",
+      aspect_ratio: "1:1",
+      resolution: "2K",
+      gpt_reference_images: [
+        {
+          download_url: "https://files.openai.example/a.png",
+          file_id: "file_a",
+        },
+        {
+          download_url: "https://files.openai.example/b.png",
+          file_id: "file_b",
+        },
+      ],
+    });
+
+    expect(generateImage).toHaveBeenCalledWith({
+      prompt: "combine refs",
+      model: "gpt-image-2",
+      aspect_ratio: "1:1",
+      resolution: "2K",
+      gpt_reference_images: [
+        expect.objectContaining({ file_id: "file_a" }),
+        expect.objectContaining({ file_id: "file_b" }),
+      ],
+    });
+  });
+
+  it("expands prompts into concurrent WJ jobs and merges assets", async () => {
+    let active = 0;
+    let maximumActive = 0;
+    const generateImage = vi.fn(async (input: { prompt: string }) => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      active -= 1;
+      return {
+        model_id: "gpt-image-2",
+        resolution: "2K",
+        aspect_ratio: "1:1",
+        duration_ms: 10,
+        assets: [{
+          type: "image",
+          mime_type: "image/png",
+          url: `https://img.downk.cc/${encodeURIComponent(input.prompt)}.png`,
+        }],
+      };
+    });
+    const service = new GenerationService(
+      { generateImage } as unknown as WjClient,
+      testConfig({ IMAGE_MAX_CONCURRENCY: "2" }),
+    );
+
+    const result = await service.generate("terminal", {
+      prompts: ["one", "two", "three"],
+      model: "gpt-image-2",
+      aspect_ratio: "1:1",
+      resolution: "2K",
+    });
+
+    expect(generateImage).toHaveBeenCalledTimes(3);
+    expect(maximumActive).toBe(2);
+    expect(result.assets).toHaveLength(3);
+    expect(result.duration_ms).toBe(30);
+    expect(result.assets.map((asset) => asset.url)).toEqual([
+      "https://img.downk.cc/one.png",
+      "https://img.downk.cc/two.png",
+      "https://img.downk.cc/three.png",
+    ]);
   });
 });

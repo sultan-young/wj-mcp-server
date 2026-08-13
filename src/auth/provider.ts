@@ -13,7 +13,11 @@ import type { RedisClient } from "../redis.js";
 import { createOidcRedisAdapter } from "./redis-adapter.js";
 
 const SHARED_ACCOUNT_ID = "wj-shared-access";
-const REQUIRED_SCOPE = "wj:image";
+/** Canonical MCP tool access scope (covers image, profit, product draft, etc.). */
+const REQUIRED_SCOPE = "wj:tools";
+/** Legacy scope kept for existing ChatGPT tokens until users reconnect. */
+const LEGACY_SCOPE = "wj:image";
+const RESOURCE_SCOPES = `${REQUIRED_SCOPE} ${LEGACY_SCOPE}`;
 
 type InteractionDetails = Awaited<ReturnType<Provider["interactionDetails"]>>;
 
@@ -72,7 +76,7 @@ export function createAuthServices(
           if (new URL(resourceIndicator).href !== mcpResource) throw new errors.InvalidTarget();
           return {
             audience: mcpResource,
-            scope: REQUIRED_SCOPE,
+            scope: RESOURCE_SCOPES,
             accessTokenFormat: "opaque",
             accessTokenTTL: config.OAUTH_ACCESS_TOKEN_TTL_SECONDS,
           };
@@ -95,7 +99,7 @@ export function createAuthServices(
       methods: ["S256"],
       required: () => true,
     },
-    scopes: ["openid", "offline_access", REQUIRED_SCOPE],
+    scopes: ["openid", "offline_access", REQUIRED_SCOPE, LEGACY_SCOPE],
     ttl: {
       AccessToken: config.OAUTH_ACCESS_TOKEN_TTL_SECONDS,
       Grant: config.OAUTH_REFRESH_TOKEN_TTL_SECONDS,
@@ -119,10 +123,11 @@ export function createAuthServices(
       if (!audiences.includes(mcpResource)) {
         throw new InvalidTokenError("Access token was not issued for this MCP resource");
       }
+      const scopes = normalizeGrantedScopes([...token.scopes]);
       return {
         token: rawToken,
         clientId: token.clientId,
-        scopes: [...token.scopes],
+        scopes,
         expiresAt: token.exp,
         resource: config.mcpUrl,
         extra: {
@@ -146,12 +151,19 @@ export function createAuthServices(
       response_types_supported: ["code"],
       grant_types_supported: ["authorization_code", "refresh_token"],
       token_endpoint_auth_methods_supported: ["none", "client_secret_basic", "client_secret_post"],
-      scopes_supported: ["openid", "offline_access", REQUIRED_SCOPE],
+      scopes_supported: ["openid", "offline_access", REQUIRED_SCOPE, LEGACY_SCOPE],
       code_challenge_methods_supported: ["S256"],
     },
   };
 }
 
+/** Expand legacy wj:image grants so they satisfy requiredScopes: wj:tools. */
+function normalizeGrantedScopes(scopes: string[]): string[] {
+  const set = new Set(scopes);
+  if (set.has(LEGACY_SCOPE)) set.add(REQUIRED_SCOPE);
+  if (set.has(REQUIRED_SCOPE)) set.add(LEGACY_SCOPE);
+  return [...set];
+}
 function createInteractionRouter(
   provider: Provider,
   config: AppConfig,
@@ -353,4 +365,7 @@ function asyncHandler(handler: (req: Request, res: Response) => Promise<void>) {
   return (req: Request, res: Response, next: NextFunction) => void handler(req, res).catch(next);
 }
 
+export const WJ_MCP_SCOPE = REQUIRED_SCOPE;
+export const WJ_LEGACY_SCOPE = LEGACY_SCOPE;
+/** @deprecated Use WJ_MCP_SCOPE. Alias kept for older imports; value is now wj:tools. */
 export const WJ_IMAGE_SCOPE = REQUIRED_SCOPE;

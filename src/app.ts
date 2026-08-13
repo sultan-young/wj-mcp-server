@@ -10,7 +10,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import helmet from "helmet";
 import type { HttpLogger, Options as PinoHttpOptions } from "pino-http";
 
-import { createAuthServices, WJ_IMAGE_SCOPE } from "./auth/provider.js";
+import { createAuthServices, WJ_LEGACY_SCOPE, WJ_MCP_SCOPE } from "./auth/provider.js";
 import type { AppConfig } from "./config.js";
 import { GenerationService } from "./generation-service.js";
 import { ImageResultStore } from "./image-result-store.js";
@@ -63,7 +63,7 @@ export async function createApplication(dependencies: AppDependencies) {
     res.status(200).json({
       resource: config.mcpUrl.href,
       authorization_servers: [config.publicBaseUrl.origin],
-      scopes_supported: [WJ_IMAGE_SCOPE],
+      scopes_supported: [WJ_MCP_SCOPE, WJ_LEGACY_SCOPE],
       resource_name: "WJ Tools",
       resource_documentation: new URL("/", config.publicBaseUrl).href,
     });
@@ -73,7 +73,7 @@ export async function createApplication(dependencies: AppDependencies) {
     oauthMetadata: auth.oauthMetadata,
     resourceServerUrl: config.mcpUrl,
     serviceDocumentationUrl: new URL("/", config.publicBaseUrl),
-    scopesSupported: [WJ_IMAGE_SCOPE],
+    scopesSupported: [WJ_MCP_SCOPE, WJ_LEGACY_SCOPE],
     resourceName: "WJ Tools",
   }));
   app.use(auth.interactionRouter);
@@ -92,7 +92,7 @@ export async function createApplication(dependencies: AppDependencies) {
 
   const authenticate = requireBearerAuth({
     verifier: auth.verifier,
-    requiredScopes: [WJ_IMAGE_SCOPE],
+    requiredScopes: [WJ_MCP_SCOPE],
     resourceMetadataUrl: protectedResourceMetadataUrl.href,
   });
   const mcpBody = express.json({ limit: "1mb" });

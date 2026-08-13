@@ -26,7 +26,7 @@ describe("WJ MCP server", () => {
     await Promise.all(closeCallbacks.splice(0).map((close) => close()));
   });
 
-  it("advertises and calls image generation and private-attachment editing tools", async () => {
+  it("advertises and calls image generation and private-attachment tools", async () => {
     const generate = vi.fn().mockResolvedValue({
       model_id: "gpt-image-2",
       resolution: "2K",
@@ -72,13 +72,13 @@ describe("WJ MCP server", () => {
 
     const tools = await client.listTools();
     const tool = tools.tools.find((item) => item.name === "generate_image");
-    const editTool = tools.tools.find((item) => item.name === "edit_image");
     const recoveryTool = tools.tools.find((item) => item.name === "get_image_result");
     const calculateProfitTool = tools.tools.find((item) => item.name === "calculate_profit");
     const saveProfitTool = tools.tools.find((item) => item.name === "save_profit_calculation");
     const listCategoriesTool = tools.tools.find((item) => item.name === "list_product_categories");
     const createDraftTool = tools.tools.find((item) => item.name === "create_product_draft");
     expect(tools.tools.map((item) => item.name)).not.toContain("generate_images");
+    expect(tools.tools.map((item) => item.name)).not.toContain("edit_image");
     expect(tools.tools.map((item) => item.name)).not.toContain("publish_product_draft");
     expect(listCategoriesTool).toBeTruthy();
     expect(createDraftTool?.description).toContain("user_confirmed");
@@ -86,32 +86,22 @@ describe("WJ MCP server", () => {
     expect(tool?._meta?.["openai/outputTemplate"]).toBe(IMAGE_WIDGET_URI);
     expect(tool?.inputSchema).toEqual(expect.objectContaining({ type: "object" }));
     expect(tool?.inputSchema.properties).not.toHaveProperty("count");
-    expect(tool?._meta?.securitySchemes).toEqual([{ type: "oauth2", scopes: ["wj:image"] }]);
-    expect(tool?.description).toContain("prefer listing the original image URL");
-    expect(editTool?._meta?.["ui/resourceUri"]).toBe(IMAGE_WIDGET_URI);
-    expect(editTool?.description).toContain("prefer listing the original image URL");
-    expect(editTool?._meta?.["openai/fileParams"]).toEqual(["target_image", "reference_images"]);
-    expect(editTool?.inputSchema).toEqual(expect.objectContaining({
+    expect(tool?._meta?.securitySchemes).toEqual([{ type: "oauth2", scopes: ["wj:tools"] }]);
+    expect(tool?._meta?.["openai/fileParams"]).toEqual(["gpt_reference_images"]);
+    expect(tool?.description).toContain("Let the WJ image component display results");
+    expect(tool?.description).toContain("prompts");
+    expect(tool?.inputSchema).toEqual(expect.objectContaining({
       type: "object",
-      required: expect.arrayContaining(["prompt", "target_image"]),
+      required: expect.arrayContaining(["prompts"]),
       properties: expect.objectContaining({
-        target_image: expect.objectContaining({ type: "object" }),
-        reference_images: expect.objectContaining({ type: "array" }),
+        prompts: expect.objectContaining({ type: "array" }),
+        gpt_reference_images: expect.objectContaining({ type: "array" }),
       }),
     }));
-    const editProperties = editTool?.inputSchema.properties as Record<string, Record<string, unknown>> | undefined;
-    const targetImageSchema = editProperties?.target_image;
-    const referenceImagesSchema = editProperties?.reference_images;
-    expect(targetImageSchema).toEqual(expect.objectContaining({
-      additionalProperties: false,
-      required: ["download_url", "file_id"],
-      properties: expect.objectContaining({
-        download_url: expect.objectContaining({ type: "string" }),
-        file_id: expect.objectContaining({ type: "string" }),
-        mime_type: expect.objectContaining({ type: "string" }),
-        file_name: expect.objectContaining({ type: "string" }),
-      }),
-    }));
+    expect(tool?.inputSchema.properties).not.toHaveProperty("prompt");
+    expect(tool?.inputSchema.properties).not.toHaveProperty("reference_image_urls");
+    const generateProperties = tool?.inputSchema.properties as Record<string, Record<string, unknown>> | undefined;
+    const referenceImagesSchema = generateProperties?.gpt_reference_images;
     expect(referenceImagesSchema?.items).toEqual(expect.objectContaining({
       additionalProperties: false,
       required: ["download_url", "file_id"],
@@ -174,7 +164,7 @@ describe("WJ MCP server", () => {
 
     const response = await client.callTool({
       name: "generate_image",
-      arguments: { prompt: "A quiet futuristic city" },
+      arguments: { prompts: ["A quiet futuristic city"] },
     });
     expect(response.isError).not.toBe(true);
     expect(response.structuredContent).toEqual(expect.objectContaining({
@@ -211,45 +201,61 @@ describe("WJ MCP server", () => {
 
     await client.callTool({
       name: "generate_image",
-      arguments: { prompt: "A small explicit-resolution image", resolution: "1K" },
+      arguments: { prompts: ["A small explicit-resolution image"], resolution: "1K" },
     });
     expect(generate).toHaveBeenNthCalledWith(2, "wj-shared-access", expect.objectContaining({
       resolution: "1K",
     }));
 
-    const editResponse = await client.callTool({
-      name: "edit_image",
+    const editLikeResponse = await client.callTool({
+      name: "generate_image",
       arguments: {
-        prompt: "Add the handwritten name from image two to the board in image one",
-        target_image: {
-          download_url: "https://files.openai.example/target.png?signature=one",
-          file_id: "file_target",
-          mime_type: "image/png",
-          file_name: "target.png",
-        },
-        reference_images: [{
-          download_url: "https://files.openai.example/reference.png?signature=two",
-          file_id: "file_reference",
-          mime_type: "image/png",
-          file_name: "reference.png",
-        }],
+        prompts: ["Add the handwritten name from image two to the board in image one"],
+        gpt_reference_images: [
+          {
+            download_url: "https://files.openai.example/target.png?signature=one",
+            file_id: "file_target",
+            mime_type: "image/png",
+            file_name: "target.png",
+          },
+          {
+            download_url: "https://files.openai.example/reference.png?signature=two",
+            file_id: "file_reference",
+            mime_type: "image/png",
+            file_name: "reference.png",
+          },
+        ],
       },
     });
-    expect(editResponse.isError).not.toBe(true);
-    expect(editResponse.structuredContent).toEqual(expect.objectContaining({
+    expect(editLikeResponse.isError).not.toBe(true);
+    expect(editLikeResponse.structuredContent).toEqual(expect.objectContaining({
       model: "gpt-image-2",
       assets: [expect.objectContaining({ url: "https://img.downk.cc/generated.png" })],
     }));
-    expect(generate).toHaveBeenLastCalledWith("wj-shared-access", {
-      prompt: "Add the handwritten name from image two to the board in image one",
+    expect(generate).toHaveBeenLastCalledWith("wj-shared-access", expect.objectContaining({
+      prompts: ["Add the handwritten name from image two to the board in image one"],
       model: "gpt-image-2",
       aspect_ratio: "1:1",
       resolution: "2K",
-      reference_image_urls: [
-        "https://files.openai.example/target.png?signature=one",
-        "https://files.openai.example/reference.png?signature=two",
+      gpt_reference_images: [
+        expect.objectContaining({ file_id: "file_target" }),
+        expect.objectContaining({ file_id: "file_reference" }),
       ],
+    }));
+
+    const batchResponse = await client.callTool({
+      name: "generate_image",
+      arguments: {
+        prompts: ["red mug on white table", "blue mug on white table", "green mug on white table"],
+      },
     });
+    expect(batchResponse.isError).not.toBe(true);
+    expect(batchResponse.structuredContent).toEqual(expect.objectContaining({
+      assets: expect.any(Array),
+    }));
+    expect(generate).toHaveBeenLastCalledWith("wj-shared-access", expect.objectContaining({
+      prompts: ["red mug on white table", "blue mug on white table", "green mug on white table"],
+    }));
 
     const resources = await client.listResources();
     expect(resources.resources.map((resource) => resource.uri)).toEqual([IMAGE_WIDGET_URI]);
@@ -271,6 +277,11 @@ describe("WJ MCP server", () => {
             resourceDomains: expect.arrayContaining(["https://img.downk.cc"]),
           }),
         }),
+        "openai/widgetCSP": expect.objectContaining({
+          resource_domains: expect.arrayContaining(["https://img.downk.cc"]),
+          redirect_domains: expect.arrayContaining(["https://img.downk.cc"]),
+        }),
+        "openai/widgetDescription": expect.stringContaining("WJ-generated images"),
       }),
     }));
   });
@@ -295,7 +306,7 @@ describe("WJ MCP server", () => {
 
     const response = await client.callTool({
       name: "generate_image",
-      arguments: { prompt: "A test image" },
+      arguments: { prompts: ["A test image"] },
     });
 
     expect(response.isError).toBe(true);
@@ -408,7 +419,7 @@ describe("WJ MCP server", () => {
 
     const response = await client.callTool({
       name: "generate_image",
-      arguments: { prompt: "A recoverable image" },
+      arguments: { prompts: ["A recoverable image"] },
     });
 
     expect(response.isError).not.toBe(true);

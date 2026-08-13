@@ -1,0 +1,15 @@
+---
+description: Docs, Skills, and MCP instructions describe current behavior only—never change history.
+alwaysApply: true
+---
+
+# Current-state documentation only
+
+When writing or updating README, `docs/`, `skills/**/SKILL.md`, MCP tool/server `description`/`instructions`, or similar user/agent-facing text:
+
+- Describe **only what exists now** (tools, params, limits, how to call them).
+- Do **not** narrate migrations, renames, removals, or “formerly / no longer / there is no separate X”.
+- Do **not** contrast with old APIs (e.g. “we removed edit_image”, “no public URL param anymore”).
+- Negative capability boundaries are OK only when they are **current product rules** (e.g. “publish is done in ERP”), not changelog phrasing.
+
+Regression tests may assert absence of old symbols; that is not documentation.

@@ -41,7 +41,7 @@ describe("OAuth flow", () => {
       client_id: clientId,
       response_type: "code",
       redirect_uri: redirectUri,
-      scope: "wj:image",
+      scope: "wj:tools",
       resource: config.mcpUrl.href,
       code_challenge: challenge,
       code_challenge_method: "S256",
@@ -106,7 +106,7 @@ describe("OAuth flow", () => {
       .expect(200);
     expect(tokenResponse.body).toEqual(expect.objectContaining({
       token_type: "Bearer",
-      scope: "wj:image",
+      scope: expect.stringMatching(/wj:tools/),
     }));
     expect(tokenResponse.body.access_token).toBeTruthy();
     expect(tokenResponse.body.refresh_token).toBeTruthy();
@@ -114,7 +114,7 @@ describe("OAuth flow", () => {
     const verified = await auth.verifier.verifyAccessToken(String(tokenResponse.body.access_token));
     expect(verified.clientId).toBe(clientId);
     expect(verified.extra?.terminalId).toEqual(expect.any(String));
-    expect(verified.scopes).toContain("wj:image");
+    expect(verified.scopes).toEqual(expect.arrayContaining(["wj:tools", "wj:image"]));
     expect(verified.resource?.href).toBe(config.mcpUrl.href);
   }, 20_000);
 });
