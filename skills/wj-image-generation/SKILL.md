@@ -47,7 +47,8 @@ Use `generate_image` for creation and editing. It returns a `jobId` immediately;
 3. Do not claim images are ready until the component shows assets or a completed result includes assets.
 4. Identify the result as generated through WJ.
 5. If an image component does not display after completion and a `resultId` is available, call `get_image_result` before regenerating. Never regenerate solely because the component failed to display.
-6. `get_image_result` is a read-only recovery tool for completed results: it remounts the image component and consumes no WJ image quota.
-7. If the component is still missing, the user still cannot see the images, recovery is unavailable, or the result has expired: paste the plain-text HTTPS original links from the tool result into the assistant reply (URLs only, no markdown image syntax). Do not regenerate automatically.
-8. Retry the same request at most once for a transient timeout or `502`-class upstream failure on job submission.
-9. Do not retry authentication, authorization, WJ quota, or WJ rate-limit failures reported on a failed job. Report the actionable error clearly.
+6. If the component fails with "Failed to fetch template" and only a `jobId` is available, call `get_image_result` with `job_id` (and `wait_ms`) until completed, then paste plain-text HTTPS links if needed.
+7. `get_image_result` accepts `result_id` or `job_id`. It is read-only and consumes no WJ image quota.
+8. If the component is still missing, the user still cannot see the images, recovery is unavailable, or the result has expired: paste the plain-text HTTPS original links from the tool result into the assistant reply (URLs only, no markdown image syntax). Do not regenerate automatically.
+9. Retry the same request at most once for a transient timeout or `502`-class upstream failure on job submission.
+10. Do not retry authentication, authorization, WJ quota, or WJ rate-limit failures reported on a failed job. Report the actionable error clearly.

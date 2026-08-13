@@ -214,6 +214,15 @@ describe("WJ MCP server", () => {
     }));
     expect(generateImage).toHaveBeenCalledTimes(generateCallsBeforeRecovery);
 
+    const recoveredByJob = await client.callTool({
+      name: "get_image_result",
+      arguments: { job_id: acceptedJobId },
+    });
+    expect(recoveredByJob.isError).not.toBe(true);
+    expect(recoveredByJob.structuredContent).toEqual(expect.objectContaining({
+      assets: [expect.objectContaining({ url: "https://img.downk.cc/generated.png" })],
+    }));
+
     const res1k = await client.callTool({
       name: "generate_image",
       arguments: { prompts: ["A small explicit-resolution image"], resolution: "1K" },

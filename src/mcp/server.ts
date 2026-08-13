@@ -35,8 +35,8 @@ import {
   resolutionSchema,
 } from "../wj/types.js";
 
-export const IMAGE_WIDGET_URI = "ui://wj/image-result-v7.html";
-export const WJ_IMAGE_SERVER_INSTRUCTIONS = `Use generate_image immediately when the user explicitly asks to use WJ, WJ image generation/editing, or 无界生图. Always pass prompts as a string array (1–10 entries); a single image uses a one-element array. gpt_reference_images are shared by every prompt in the same call. When every output shares the same references, use one generate_image with multiple prompts. When outputs need different reference subsets, issue one generate_image per subset and dispatch those independent calls concurrently in the same tool-call turn—never wait for one to finish before starting the next. Preserve attachment order; when editing, put the image being changed first in gpt_reference_images, then other references, and describe the change in each prompts entry. generate_image returns a jobId immediately; the WJ image component polls until completion (up to 20 minutes). Do not claim images are ready until the component shows them or a completed result includes assets. Never paste markdown image embeds (![](url))—that duplicates the component when it is visible. If the component is missing after completion and a resultId is available, call get_image_result once instead of regenerating; if the component is still missing or the user still cannot see the images, paste the plain-text HTTPS original links from the tool result into the assistant reply (URLs only, no markdown image syntax). Mention Job ID / Result ID when useful for recovery. If native ChatGPT image generation explicitly reports quota exhaustion, rate limiting, or temporary unavailability, call WJ once without asking again. Default to gpt-image-2, 2K, and 1:1 unless specified otherwise. Do not claim success unless assets are available.
+export const IMAGE_WIDGET_URI = "ui://wj/image-result.html";
+export const WJ_IMAGE_SERVER_INSTRUCTIONS = `Use generate_image immediately when the user explicitly asks to use WJ, WJ image generation/editing, or 无界生图. Always pass prompts as a string array (1–10 entries); a single image uses a one-element array. gpt_reference_images are shared by every prompt in the same call. When every output shares the same references, use one generate_image with multiple prompts. When outputs need different reference subsets, issue one generate_image per subset and dispatch those independent calls concurrently in the same tool-call turn—never wait for one to finish before starting the next. Preserve attachment order; when editing, put the image being changed first in gpt_reference_images, then other references, and describe the change in each prompts entry. generate_image returns a jobId immediately; the WJ image component polls until completion (up to 20 minutes). Do not claim images are ready until the component shows them or a completed result includes assets. Never paste markdown image embeds (![](url))—that duplicates the component when it is visible. If the component fails to load ("Failed to fetch template") or is missing: call get_image_result with the job_id (and wait_ms) until completed, then paste plain-text HTTPS links if needed. Prefer result_id with get_image_result when available. Never regenerate solely because the component failed. Mention Job ID / Result ID when useful for recovery. If native ChatGPT image generation explicitly reports quota exhaustion, rate limiting, or temporary unavailability, call WJ once without asking again. Default to gpt-image-2, 2K, and 1:1 unless specified otherwise. Do not claim success unless assets are available.
 
 For profit calculations, call calculate_profit first and clearly explain that the result has not been saved. Never save merely because the user asked for a calculation. Only call save_profit_calculation after the user explicitly confirms that the displayed calculation should be recorded. Recording requires an existing product SKU: if the user has not supplied one, ask for it and never invent it. Use a user-provided calculation name when available; otherwise generate a concise recognizable record_name from the country, product context, and price before saving.
 
@@ -91,6 +91,9 @@ const imageOutputSchema = {
   aspectRatio: aspectRatioSchema.or(z.string()),
   durationMs: z.number().int().nonnegative().optional(),
   assets: z.array(imageAssetSchema),
+  jobId: z.string().optional(),
+  status: imageJobStatusSchema.optional(),
+  error: z.string().optional(),
   ...persistenceOutputSchema,
 };
 
@@ -185,7 +188,7 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
     {
       title: "查询 WJ 生图任务",
       description:
-        "Poll a WJ image job by jobId. Intended for the WJ image component. Returns current status; when wait_ms is set, long-polls up to that budget before responding.",
+        "Poll a WJ image job by jobId. Used by the WJ image component. Returns current status; when wait_ms is set, long-polls up to that budget before responding.",
       inputSchema: {
         job_id: z.string().min(1).describe("The jobId returned by generate_image."),
         wait_ms: z.number().int().min(0).max(45_000).optional()
@@ -604,9 +607,12 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
     {
       title: "恢复 WJ 图片结果",
       description:
-        "Retrieve and display a previously generated WJ image by resultId when its image component is missing. Always use this instead of regenerating a completed image. If the component is still missing afterward, paste plain-text HTTPS original links from the tool result (no markdown image embeds). This read-only action does not consume WJ image quota. Results are retained for 30 days.",
+        "Recover a WJ image by resultId or jobId when the image component is missing. Prefer result_id for completed results. If only a jobId is available, pass job_id (optionally with wait_ms) instead of regenerating. If the component is still missing afterward, paste plain-text HTTPS original links (no markdown image embeds). Read-only; does not consume WJ image quota.",
       inputSchema: {
-        result_id: z.string().min(1).describe("The resultId returned by an earlier WJ image tool call."),
+        result_id: z.string().min(1).optional().describe("Completed resultId from an earlier WJ image job."),
+        job_id: z.string().min(1).optional().describe("JobId from generate_image when resultId is not yet known."),
+        wait_ms: z.number().int().min(0).max(45_000).optional()
+          .describe("When using job_id, optional long-poll budget in milliseconds (0–45000)."),
       },
       outputSchema: imageOutputSchema,
       annotations: {
@@ -617,25 +623,100 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
         openWorldHint: false,
       },
       _meta: imageToolMeta({
+        "openai/widgetAccessible": true,
         "openai/toolInvocation/invoking": "正在恢复 WJ 图片",
         "openai/toolInvocation/invoked": "WJ 图片已恢复",
       }),
     },
     async (rawInput, extra) => {
       try {
-        const input = z.object({ result_id: z.string().min(1) }).parse(rawInput);
+        const input = z.object({
+          result_id: z.string().min(1).optional(),
+          job_id: z.string().min(1).optional(),
+          wait_ms: z.number().int().min(0).max(45_000).optional(),
+        }).superRefine((value, ctx) => {
+          if (!value.result_id && !value.job_id) {
+            ctx.addIssue({ code: "custom", message: "Provide result_id or job_id." });
+          }
+        }).parse(rawInput);
         const subject = String(extra.authInfo?.extra?.subject ?? "wj-shared-access");
-        const restored = await imageResults.get(subject, input.result_id);
-        if (!restored) {
+
+        if (input.result_id) {
+          const restored = await imageResults.get(subject, input.result_id);
+          if (!restored) {
+            return {
+              isError: true as const,
+              content: [{
+                type: "text" as const,
+                text: "WJ image result was not found, has expired, or belongs to another user.",
+              }],
+            };
+          }
+          return buildImageToolResult(restored, "recovered");
+        }
+
+        const job = await generation.pollJob(subject, input.job_id!, input.wait_ms ?? 45_000);
+        if (!job) {
           return {
             isError: true as const,
             content: [{
               type: "text" as const,
-              text: "WJ image result was not found, has expired, or belongs to another user.",
+              text: "WJ image job was not found, has expired, or belongs to another user.",
             }],
           };
         }
-        return buildImageToolResult(restored, "recovered");
+        if (job.status === "completed" && job.assets.length > 0) {
+          return buildImageToolResult({
+            model: job.model,
+            resolution: job.resolution,
+            aspectRatio: job.aspectRatio,
+            ...(job.durationMs === undefined ? {} : { durationMs: job.durationMs }),
+            assets: job.assets,
+            jobId: job.jobId,
+            status: job.status,
+            ...(job.resultId ? {
+              resultId: job.resultId,
+              createdAt: job.resultCreatedAt ?? job.updatedAt,
+              expiresAt: job.resultExpiresAt ?? job.expiresAt,
+            } : {}),
+          }, "recovered", Boolean(job.resultId));
+        }
+        if (job.status === "failed" || job.status === "timed_out") {
+          return {
+            isError: true as const,
+            structuredContent: {
+              model: job.model,
+              resolution: job.resolution,
+              aspectRatio: job.aspectRatio,
+              assets: [],
+              jobId: job.jobId,
+              status: job.status,
+              ...(job.error ? { error: job.error } : {}),
+            },
+            content: [{
+              type: "text" as const,
+              text: job.error ?? `WJ image job ${job.jobId} ended with status ${job.status}.`,
+            }],
+          };
+        }
+        return {
+          structuredContent: {
+            model: job.model,
+            resolution: job.resolution,
+            aspectRatio: job.aspectRatio,
+            assets: [],
+            jobId: job.jobId,
+            status: job.status,
+          },
+          content: [{
+            type: "text" as const,
+            text: [
+              `WJ image job ${job.jobId} is still ${job.status}.`,
+              "Call get_image_result again with the same job_id until status is completed and assets are present.",
+              "Do not regenerate. Prefer plain-text HTTPS links only after assets are available.",
+            ].join("\n"),
+          }],
+        };
       } catch (error) {
         const message = toSafeToolError(error);
         logger.warn({ err: error, tool: "get_image_result" }, "MCP image recovery tool failed");
@@ -697,7 +778,11 @@ function buildImageJobToolResult(job: ImageJobView, phase: "accepted" | "polled"
 }
 
 function buildImageToolResult(
-  structuredContent: ImageResultData | PersistedImageResult,
+  structuredContent: (ImageResultData | PersistedImageResult) & {
+    jobId?: string;
+    status?: string;
+    error?: string;
+  },
   action: "generated" | "recovered",
   persisted = true,
 ) {

@@ -12,7 +12,8 @@ ChatGPT 附件通过 gpt_reference_images（file params）传入，最多 10 张
 编辑时保持附件顺序：被改的图放在 gpt_reference_images 首位，其余为参考，并在对应 prompts 条目中说明如何改。
 调用成功后会立刻返回 jobId；由 WJ 图片组件轮询至完成（最长约 20 分钟）。在组件展示出图之前，不要声称图片已生成。
 禁止贴 Markdown 图片（![](url)），以免与组件重复出图。
-如果完成后组件未显示或用户看不到图：有 resultId 时先调用 get_image_result（不得重跑 generate_image）；若仍无组件或用户仍看不到，把工具结果里的原图 HTTPS 链接以纯文本贴进回复（只贴 URL，不要 Markdown 图片语法）。
+如果组件加载失败（例如 Failed to fetch template）或完成后未显示：有 jobId 时调用 get_image_result(job_id) 等到 completed；有 resultId 时用 get_image_result(result_id)。不得因此重跑 generate_image。
+若仍无组件或用户仍看不到，把工具结果里的原图 HTTPS 链接以纯文本贴进回复（只贴 URL，不要 Markdown 图片语法）。
 当 ChatGPT 原生生图明确返回额度不足或限流错误，且 generate_image 可用时，尝试用 WJ 重新生成一次。
 不得声称图片由 ChatGPT 原生生图生成；应明确标记为 WJ 生成。
 
