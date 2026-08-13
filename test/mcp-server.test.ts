@@ -144,8 +144,9 @@ describe("WJ MCP server", () => {
         file_id: expect.objectContaining({ type: "string" }),
       }),
     }));
-    expect(recoveryTool?._meta?.["ui/resourceUri"]).toBe(IMAGE_WIDGET_URI);
-    expect(recoveryTool?._meta?.["openai/outputTemplate"]).toBe(IMAGE_WIDGET_URI);
+    expect(recoveryTool?._meta?.["ui/resourceUri"]).toBeUndefined();
+    expect(recoveryTool?._meta?.["openai/outputTemplate"]).toBeUndefined();
+    expect(recoveryTool?._meta?.["openai/widgetAccessible"]).toBe(true);
     expect(calculateProfitTool).toBeTruthy();
     expect(saveProfitTool).toBeTruthy();
 

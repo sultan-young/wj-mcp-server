@@ -18,7 +18,7 @@
 - 完成后结果保存到 Redis 30 天，可通过 `get_image_result` 无额度恢复
 - 组件轮询 `get_image_job`；不可用时以纯文本原图 HTTPS 链接兜底（不返回 Markdown 图片块）
 - 支持 `nano-banana-2`、常用宽高比、`1K/2K/4K` 和 ChatGPT 附件参考图
-- MCP Apps 图片组件：任务进行中显示加载态，完成后横向图条切换选中项并提供打开/下载
+- MCP Apps 图片组件：左侧主图、右侧缩略图切换，主图下方展示分辨率/耗时等元信息并提供打开/下载
 - OAuth 2.1 授权码流程、PKCE、动态客户端注册和刷新令牌
 - Redis 持久化 OAuth 数据、分钟/每日限额和登录防爆破
 - 服务端 WJ Key，不向 ChatGPT 或浏览器泄露

@@ -14,21 +14,26 @@
       <div id="error" class="error" hidden>图片结果暂时无法显示，请使用消息中的原图链接。</div>
       <section id="result" hidden>
         <div class="layout">
-          <div id="thumbs" class="thumbs" aria-label="生成图片"></div>
-          <div class="meta-row">
-            <div class="meta">
-              <strong id="model">WJ</strong>
-              <span id="details"></span>
+          <div class="main-col">
+            <div class="main-stage" aria-label="当前图片">
+              <img id="main-image" alt="WJ 生成图片" decoding="async" referrerpolicy="no-referrer" />
             </div>
-            <div class="actions">
-              <button id="download" type="button" title="下载当前图片" aria-label="下载当前图片">
-                <i data-lucide="download"></i>
-              </button>
-              <button id="open" type="button" title="打开当前原图" aria-label="打开当前原图">
-                <i data-lucide="external-link"></i>
-              </button>
+            <div class="meta-row">
+              <div class="meta">
+                <strong id="model">WJ</strong>
+                <span id="details"></span>
+              </div>
+              <div class="actions">
+                <button id="download" type="button" title="下载当前图片" aria-label="下载当前图片">
+                  <i data-lucide="download"></i>
+                </button>
+                <button id="open" type="button" title="打开当前原图" aria-label="打开当前原图">
+                  <i data-lucide="external-link"></i>
+                </button>
+              </div>
             </div>
           </div>
+          <div id="thumbs" class="thumbs" aria-label="缩略图" hidden></div>
         </div>
       </section>
     </main>

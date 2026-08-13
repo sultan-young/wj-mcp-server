@@ -38,6 +38,7 @@ const loading = requiredElement<HTMLDivElement>("loading");
 const loadingText = requiredElement<HTMLSpanElement>("loading-text");
 const errorBox = requiredElement<HTMLDivElement>("error");
 const result = requiredElement<HTMLElement>("result");
+const mainImage = requiredElement<HTMLImageElement>("main-image");
 const thumbs = requiredElement<HTMLElement>("thumbs");
 const model = requiredElement<HTMLElement>("model");
 const details = requiredElement<HTMLSpanElement>("details");
@@ -244,6 +245,7 @@ function render(data: ImageResult, persist: boolean): void {
   renderedResultKey = resultKey;
   activeIndex = 0;
   thumbs.replaceChildren();
+  thumbs.hidden = data.assets.length < 2;
 
   for (const [index, asset] of data.assets.entries()) {
     const button = document.createElement("button");
@@ -271,6 +273,12 @@ function showIndex(nextIndex: number): void {
   if (!current?.assets.length) return;
   const total = current.assets.length;
   activeIndex = ((nextIndex % total) + total) % total;
+  const asset = current.assets[activeIndex];
+
+  if (asset) {
+    mainImage.src = asset.url;
+    mainImage.alt = `WJ 生成图片 ${activeIndex + 1}`;
+  }
 
   thumbs.querySelectorAll(".thumb").forEach((node, index) => {
     node.classList.toggle("is-active", index === activeIndex);
