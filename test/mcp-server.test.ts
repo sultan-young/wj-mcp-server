@@ -305,6 +305,7 @@ describe("WJ MCP server", () => {
         }),
         "openai/widgetCSP": expect.objectContaining({
           resource_domains: expect.arrayContaining(["https://img.downk.cc"]),
+          connect_domains: expect.arrayContaining(["https://img.downk.cc"]),
           redirect_domains: expect.arrayContaining(["https://img.downk.cc"]),
         }),
         "openai/widgetDescription": expect.stringContaining("WJ-generated images"),

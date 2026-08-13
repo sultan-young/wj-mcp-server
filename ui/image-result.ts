@@ -92,17 +92,32 @@ openButton.addEventListener("click", async () => {
 downloadButton.addEventListener("click", async () => {
   const asset = currentAsset();
   if (!asset) return;
-  await app.downloadFile({
-    contents: [
-      {
-        type: "resource_link",
-        uri: asset.url,
-        name: `wj-generated-image-${activeIndex + 1}`,
-        title: `WJ 生成图片 ${activeIndex + 1}`,
-        mimeType: asset.mime_type ?? "image/png",
-      },
-    ],
-  });
+  const filename = `wj-generated-image-${activeIndex + 1}${extensionForMime(asset.mime_type)}`;
+  const mimeType = asset.mime_type ?? "image/png";
+
+  // ChatGPT often does not implement host downloadFile (-32601); fall back to blob download.
+  try {
+    const result = await app.downloadFile({
+      contents: [
+        {
+          type: "resource_link",
+          uri: asset.url,
+          name: filename,
+          title: `WJ 生成图片 ${activeIndex + 1}`,
+          mimeType,
+        },
+      ],
+    });
+    if (!result?.isError) return;
+  } catch {
+    // continue to browser fallback
+  }
+
+  try {
+    await downloadViaBrowser(asset.url, filename, mimeType);
+  } catch {
+    await app.openLink({ url: asset.url });
+  }
 });
 
 await app.connect();
@@ -387,6 +402,33 @@ function applyHostContext(context: ReturnType<App["getHostContext"]>): void {
 function formatDuration(durationMs?: number): string | undefined {
   if (durationMs === undefined) return undefined;
   return `耗时 ${(durationMs / 1000).toFixed(durationMs >= 10_000 ? 0 : 1)}s`;
+}
+
+async function downloadViaBrowser(url: string, filename: string, mimeType: string): Promise<void> {
+  const response = await fetch(url, { mode: "cors", credentials: "omit" });
+  if (!response.ok) throw new Error(`Download fetch failed (${response.status})`);
+  const blob = await response.blob();
+  const fileBlob = blob.type ? blob : new Blob([blob], { type: mimeType });
+  const objectUrl = URL.createObjectURL(fileBlob);
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    anchor.rel = "noopener";
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000);
+  }
+}
+
+function extensionForMime(mimeType: string | undefined): string {
+  if (!mimeType) return ".png";
+  if (mimeType.includes("jpeg") || mimeType.includes("jpg")) return ".jpg";
+  if (mimeType.includes("webp")) return ".webp";
+  if (mimeType.includes("gif")) return ".gif";
+  return ".png";
 }
 
 function sleep(ms: number): Promise<void> {

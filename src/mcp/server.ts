@@ -68,12 +68,14 @@ function widgetResourceMeta(config: AppConfig) {
       domain: config.publicBaseUrl.origin,
       csp: {
         resourceDomains,
+        connectDomains: resourceDomains,
       },
     },
     "openai/widgetDescription": "Displays WJ-generated images inline with open/download actions and original HTTPS links.",
     "openai/widgetDomain": config.publicBaseUrl.origin,
     "openai/widgetCSP": {
       resource_domains: resourceDomains,
+      connect_domains: resourceDomains,
       redirect_domains: resourceDomains,
     },
   };
