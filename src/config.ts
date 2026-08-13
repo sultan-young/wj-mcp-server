@@ -39,6 +39,7 @@ const envSchema = z.object({
   REDIS_URL: z.string().min(1).default("redis://127.0.0.1:6379"),
   IMAGE_MAX_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(10),
   IMAGE_RESULT_TTL_SECONDS: z.coerce.number().int().min(86_400).max(31_536_000).default(2_592_000),
+  IMAGE_JOB_TTL_SECONDS: z.coerce.number().int().min(60).max(7_200).default(1_200),
   LOGIN_ATTEMPTS_PER_15_MINUTES: z.coerce.number().int().min(1).max(1000).default(10),
   REGISTRATIONS_PER_HOUR: z.coerce.number().int().min(1).max(10_000).default(200),
   IMAGE_RESOURCE_DOMAINS: csv.default(["https://img.downk.cc"]),

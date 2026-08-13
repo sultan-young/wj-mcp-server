@@ -5,7 +5,7 @@ description: Generate, edit, and display images with the WJ MCP tools. Use when 
 
 # WJ Image Generation
 
-Use `generate_image` for creation and editing. Use `get_image_result` only to recover an existing completed result.
+Use `generate_image` for creation and editing. It returns a `jobId` immediately; the WJ image component polls until completion. Use `get_image_result` only to recover an existing completed result by `resultId`.
 
 ## Route the request
 
@@ -25,7 +25,7 @@ Use `generate_image` for creation and editing. Use `get_image_result` only to re
 
 `gpt_reference_images` is shared by every entry in that same `generate_image` call. Choose the dispatch pattern from the plan:
 
-1. **Same reference set for every output** — one `generate_image` call. Put each output text in `prompts` (1–10). The server generates those entries concurrently.
+1. **Same reference set for every output** — one `generate_image` call. Put each output text in `prompts` (1–10). The server generates those entries concurrently in the background.
 2. **Different reference subsets per output** (for example output A uses images 1–3, output B uses 4–5, size chart uses image 10) — issue **one `generate_image` call per output group**, each with its own `prompts` and `gpt_reference_images`.
 3. For case 2, dispatch **all of those independent `generate_image` calls in the same tool-call turn concurrently**. Do not wait for one call to finish before starting the next.
 4. Never serialize independent wash/generate jobs when they do not depend on each other's results.
@@ -42,11 +42,12 @@ Use `generate_image` for creation and editing. Use `get_image_result` only to re
 
 ## Handle results
 
-1. Treat generation as successful only when the tool returns at least one asset.
-2. Prefer the WJ image component for display. Never paste markdown image embeds (`![](url)`); that duplicates the component when it is visible.
-3. Identify the result as generated through WJ.
-4. If an image component does not display and a `resultId` is available, call `get_image_result` before doing anything else. Never regenerate solely because the component failed to display.
-5. `get_image_result` is a read-only recovery tool: it retrieves the completed result, mounts the image component again, and consumes no WJ image quota.
-6. If the component is still missing, the user still cannot see the images, recovery is unavailable, or the result has expired: paste the plain-text HTTPS original links from the tool result into the assistant reply (URLs only, no markdown image syntax). Do not regenerate automatically.
-7. Retry the same request at most once for a transient timeout or `502`-class upstream failure.
-8. Do not retry authentication, authorization, WJ quota, or WJ rate-limit failures. Report the actionable error clearly.
+1. `generate_image` returns a `jobId` immediately (status `queued`/`running`). Treat this as job accepted, not as finished images.
+2. Prefer the WJ image component for display. It polls the job for up to 20 minutes. Never paste markdown image embeds (`![](url)`); that duplicates the component when it is visible.
+3. Do not claim images are ready until the component shows assets or a completed result includes assets.
+4. Identify the result as generated through WJ.
+5. If an image component does not display after completion and a `resultId` is available, call `get_image_result` before regenerating. Never regenerate solely because the component failed to display.
+6. `get_image_result` is a read-only recovery tool for completed results: it remounts the image component and consumes no WJ image quota.
+7. If the component is still missing, the user still cannot see the images, recovery is unavailable, or the result has expired: paste the plain-text HTTPS original links from the tool result into the assistant reply (URLs only, no markdown image syntax). Do not regenerate automatically.
+8. Retry the same request at most once for a transient timeout or `502`-class upstream failure on job submission.
+9. Do not retry authentication, authorization, WJ quota, or WJ rate-limit failures reported on a failed job. Report the actionable error clearly.

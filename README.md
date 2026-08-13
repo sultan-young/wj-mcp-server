@@ -5,7 +5,7 @@
 ## 已实现
 
 - 标准 MCP Streamable HTTP 端点：`POST /mcp`
-- 图片：`generate_image`（必填 `prompts` 数组并发生成，可带共享 `gpt_reference_images`）、`get_image_result`（按 resultId 恢复结果，只读）
+- 图片：`generate_image`（提交即返回 `jobId`，组件轮询至完成）、`get_image_result`（按 resultId 恢复已完成结果，只读）
 - `generate_image` 通过 `gpt_reference_images`（`openai/fileParams`，最多 10 张）接收 ChatGPT 附件，并与本次 `prompts` 每一项共享；编辑时按附件顺序传入并由对应提示词说明改法
 - OAuth scope：`wj:tools`（同时仍接受已有 `wj:image` 令牌）
 - 利润：`calculate_profit`（试算）、`save_profit_calculation`（确认后录入）
@@ -14,12 +14,11 @@
 - 部署前在 WJ-SREVER 执行 `node scripts/seed_open_platform.js`，确保 MCP 用的 Key 具备 `openApi.productDraft`（对已有利润试算授权的 Key 会自动补授）
 - 试算不要求 SKU；录入必须提供商品池中真实存在的 SKU，并由 WJ 服务端重新计算后保存
 - 录入名称在前端为可选字段；通过 MCP 录入时由 GPT 使用用户名称或自动生成简短名称
-- `generate_image` 始终使用 `prompts`（1–10 项）；服务端按 `IMAGE_MAX_CONCURRENCY` 并发生成
-- 每次成功结果保存到 Redis 30 天，可通过 `get_image_result` 无额度恢复
-- 工具文本同时返回原图链接，Widget 不可用时仍能打开结果
+- `generate_image` 立刻返回 `jobId`；后台按 `IMAGE_MAX_CONCURRENCY` 并发生成；任务窗口默认 20 分钟（`IMAGE_JOB_TTL_SECONDS`）
+- 完成后结果保存到 Redis 30 天，可通过 `get_image_result` 无额度恢复
+- 组件轮询 `get_image_job`；不可用时以纯文本原图 HTTPS 链接兜底（不返回 Markdown 图片块）
 - 支持 `nano-banana-2`、常用宽高比、`1K/2K/4K` 和 ChatGPT 附件参考图
-- MCP Apps 图片组件：横向大图条切换选中项，下方展示分辨率/耗时等元信息并提供打开/下载
-- 组件不可用时，以工具结果中的纯文本原图 HTTPS 链接作为兜底（不返回 Markdown 图片块，避免与组件重复出图）
+- MCP Apps 图片组件：任务进行中显示加载态，完成后横向图条切换选中项并提供打开/下载
 - OAuth 2.1 授权码流程、PKCE、动态客户端注册和刷新令牌
 - Redis 持久化 OAuth 数据、分钟/每日限额和登录防爆破
 - 服务端 WJ Key，不向 ChatGPT 或浏览器泄露
@@ -108,7 +107,7 @@ curl https://mcp.wj.zaowuwujie.ltd/.well-known/oauth-protected-resource/mcp
 
 生成图片时始终传入 `prompts` 字符串数组（1–10 项；单张为一项）。服务端按 `IMAGE_MAX_CONCURRENCY` 并发生成，默认每个 OAuth 终端最多同时 10 个 WJ 请求，不同终端队列彼此独立。同提示词变体在 `prompts` 中重复相同文案；不同图写入不同提示词。可选的 `gpt_reference_images` 与本次所有 `prompts` 条目共享。
 
-每次成功调用都会返回 `resultId`、`expiresAt` 和原图链接。结果默认在 Redis 中保存 30 天；如果 ChatGPT 的图片组件没有拿到完整结果，组件会自动调用 `get_image_result`，GPT 也可以根据 `resultId` 主动调用该工具并重新展示图片。模型仍可使用返回文本中的原图链接，不能因为组件没有显示而重新生成。恢复操作不会请求 WJ，也不会消耗图片额度。
+`generate_image` 立刻返回 `jobId`；WJ 图片组件轮询任务（最长约 20 分钟）并在完成后展示。完成后会写入 `resultId`、`expiresAt` 和原图链接，结果默认在 Redis 中保存 30 天。可用 `get_image_result` 按 `resultId` 恢复；模型仍可使用返回文本中的原图链接，不能因为组件没有显示而重新生成。恢复操作不会请求 WJ，也不会消耗图片额度。
 
 ## 运维与安全
 

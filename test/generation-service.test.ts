@@ -1,9 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { GenerationService } from "../src/generation-service.js";
-import type { WjClient } from "../src/wj/client.js";
 import type { GenerateImageInput, WjGenerateImageRequest } from "../src/wj/types.js";
-import { testConfig } from "./helpers.js";
+import { testGenerationService } from "./helpers.js";
 
 describe("GenerationService", () => {
   it("runs independent image requests concurrently up to the configured limit", async () => {
@@ -25,10 +23,7 @@ describe("GenerationService", () => {
         }],
       };
     });
-    const service = new GenerationService(
-      { generateImage } as unknown as WjClient,
-      testConfig({ IMAGE_MAX_CONCURRENCY: "2" }),
-    );
+    const service = testGenerationService({ generateImage }, { IMAGE_MAX_CONCURRENCY: "2" });
     const request = (index: number): GenerateImageInput => ({
       prompts: [`image-${index}`],
       model: "gpt-image-2",
@@ -64,10 +59,7 @@ describe("GenerationService", () => {
         assets: [{ type: "image", mime_type: "image/png", url: `https://img.downk.cc/${input.prompt}.png` }],
       };
     });
-    const service = new GenerationService(
-      { generateImage } as unknown as WjClient,
-      testConfig({ IMAGE_MAX_CONCURRENCY: "2" }),
-    );
+    const service = testGenerationService({ generateImage }, { IMAGE_MAX_CONCURRENCY: "2" });
     const request = (terminalId: string, index: number): GenerateImageInput => ({
       prompts: [`${terminalId}:${index}`],
       model: "gpt-image-2",
@@ -92,10 +84,7 @@ describe("GenerationService", () => {
       aspect_ratio: "1:1",
       assets: [{ type: "image", mime_type: "image/png", url: "https://img.downk.cc/out.png" }],
     });
-    const service = new GenerationService(
-      { generateImage } as unknown as WjClient,
-      testConfig(),
-    );
+    const service = testGenerationService({ generateImage });
 
     await service.generate("terminal", {
       prompts: ["combine refs"],
@@ -146,10 +135,7 @@ describe("GenerationService", () => {
         }],
       };
     });
-    const service = new GenerationService(
-      { generateImage } as unknown as WjClient,
-      testConfig({ IMAGE_MAX_CONCURRENCY: "2" }),
-    );
+    const service = testGenerationService({ generateImage }, { IMAGE_MAX_CONCURRENCY: "2" });
 
     const result = await service.generate("terminal", {
       prompts: ["one", "two", "three"],
@@ -167,5 +153,36 @@ describe("GenerationService", () => {
       "https://img.downk.cc/two.png",
       "https://img.downk.cc/three.png",
     ]);
+  });
+
+  it("submits a job immediately and completes via polling", async () => {
+    const generateImage = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return {
+        model_id: "gpt-image-2",
+        resolution: "2K",
+        aspect_ratio: "1:1",
+        duration_ms: 30,
+        assets: [{ type: "image", mime_type: "image/png", url: "https://img.downk.cc/async.png" }],
+      };
+    });
+    const service = testGenerationService({ generateImage });
+
+    const accepted = await service.submit("subject", "terminal", {
+      prompts: ["async city"],
+      model: "gpt-image-2",
+      aspect_ratio: "1:1",
+      resolution: "2K",
+    });
+    expect(accepted.jobId).toMatch(/^wj_job_/);
+    expect(["queued", "running"]).toContain(accepted.status);
+    expect(accepted.assets).toEqual([]);
+
+    const completed = await service.pollJob("subject", accepted.jobId, 5_000);
+    expect(completed?.status).toBe("completed");
+    expect(completed?.assets).toEqual([
+      expect.objectContaining({ url: "https://img.downk.cc/async.png" }),
+    ]);
+    expect(completed?.resultId).toMatch(/^wj_img_/);
   });
 });

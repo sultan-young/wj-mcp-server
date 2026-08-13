@@ -5,6 +5,7 @@ import { z } from "zod";
 import { WJ_MCP_SCOPE } from "../auth/provider.js";
 import type { AppConfig } from "../config.js";
 import type { GenerationService } from "../generation-service.js";
+import { imageJobStatusSchema, type ImageJobView } from "../image-job-store.js";
 import { type ImageResultData, ImageResultStore, type PersistedImageResult } from "../image-result-store.js";
 import { UsageLimitError } from "../limits.js";
 import type { AppLogger } from "../logger.js";
@@ -32,11 +33,10 @@ import {
   generateImageInputSchema,
   imageAssetSchema,
   resolutionSchema,
-  type WjImageData,
 } from "../wj/types.js";
 
-export const IMAGE_WIDGET_URI = "ui://wj/image-result-v6.html";
-export const WJ_IMAGE_SERVER_INSTRUCTIONS = `Use generate_image immediately when the user explicitly asks to use WJ, WJ image generation/editing, or 无界生图. Always pass prompts as a string array (1–10 entries); a single image uses a one-element array. gpt_reference_images are shared by every prompt in the same call. When every output shares the same references, use one generate_image with multiple prompts. When outputs need different reference subsets, issue one generate_image per subset and dispatch those independent calls concurrently in the same tool-call turn—never wait for one to finish before starting the next. Preserve attachment order; when editing, put the image being changed first in gpt_reference_images, then other references, and describe the change in each prompts entry. After success, prefer the WJ image component for display. Never paste markdown image embeds (![](url))—that duplicates the component when it is visible. If the component is missing or the user cannot see the images: when a resultId is available, call get_image_result once instead of regenerating; if the component is still missing or the user still cannot see the images, paste the plain-text HTTPS original links from the tool result into the assistant reply (URLs only, no markdown image syntax). Mention Result ID when useful for recovery. If native ChatGPT image generation explicitly reports quota exhaustion, rate limiting, or temporary unavailability, call WJ once without asking again. Default to gpt-image-2, 2K, and 1:1 unless specified otherwise. Do not claim success unless the tool returns at least one asset.
+export const IMAGE_WIDGET_URI = "ui://wj/image-result-v7.html";
+export const WJ_IMAGE_SERVER_INSTRUCTIONS = `Use generate_image immediately when the user explicitly asks to use WJ, WJ image generation/editing, or 无界生图. Always pass prompts as a string array (1–10 entries); a single image uses a one-element array. gpt_reference_images are shared by every prompt in the same call. When every output shares the same references, use one generate_image with multiple prompts. When outputs need different reference subsets, issue one generate_image per subset and dispatch those independent calls concurrently in the same tool-call turn—never wait for one to finish before starting the next. Preserve attachment order; when editing, put the image being changed first in gpt_reference_images, then other references, and describe the change in each prompts entry. generate_image returns a jobId immediately; the WJ image component polls until completion (up to 20 minutes). Do not claim images are ready until the component shows them or a completed result includes assets. Never paste markdown image embeds (![](url))—that duplicates the component when it is visible. If the component is missing after completion and a resultId is available, call get_image_result once instead of regenerating; if the component is still missing or the user still cannot see the images, paste the plain-text HTTPS original links from the tool result into the assistant reply (URLs only, no markdown image syntax). Mention Job ID / Result ID when useful for recovery. If native ChatGPT image generation explicitly reports quota exhaustion, rate limiting, or temporary unavailability, call WJ once without asking again. Default to gpt-image-2, 2K, and 1:1 unless specified otherwise. Do not claim success unless assets are available.
 
 For profit calculations, call calculate_profit first and clearly explain that the result has not been saved. Never save merely because the user asked for a calculation. Only call save_profit_calculation after the user explicitly confirms that the displayed calculation should be recorded. Recording requires an existing product SKU: if the user has not supplied one, ask for it and never invent it. Use a user-provided calculation name when available; otherwise generate a concise recognizable record_name from the country, product context, and price before saving.
 
@@ -94,6 +94,23 @@ const imageOutputSchema = {
   ...persistenceOutputSchema,
 };
 
+const imageJobOutputSchema = {
+  jobId: z.string(),
+  status: imageJobStatusSchema,
+  model: z.string(),
+  resolution: z.string(),
+  aspectRatio: z.string(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  expiresAt: z.string().datetime(),
+  error: z.string().optional(),
+  durationMs: z.number().int().nonnegative().optional(),
+  assets: z.array(imageAssetSchema),
+  resultId: z.string().optional(),
+  resultCreatedAt: z.string().datetime().optional(),
+  resultExpiresAt: z.string().datetime().optional(),
+};
+
 type McpServerDependencies = {
   config: AppConfig;
   generation: GenerationService;
@@ -128,9 +145,9 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
     {
       title: "使用 WJ 生成图片",
       description:
-        "Generate or edit and display image(s) through WJ. Always pass prompts as a string array (1–10); one image uses [\"...\"]. The server runs all entries concurrently with shared model/aspect_ratio/resolution. Optional gpt_reference_images (file params, up to 10) are shared across every prompt in the call. Default to gpt-image-2 and 2K. Prefer the WJ image component for display; never use markdown image embeds. If the component is missing, recover with get_image_result when possible, otherwise paste plain-text HTTPS original links from the tool result. Each generated image consumes WJ quota.",
+        "Submit WJ image generation/editing and return a jobId immediately. Always pass prompts as a string array (1–10); one image uses [\"...\"]. The server runs jobs in the background with shared model/aspect_ratio/resolution. Optional gpt_reference_images (file params, up to 10) are shared across every prompt in the call. Default to gpt-image-2 and 2K. The WJ image component polls until completion (up to 20 minutes). Do not claim images are ready until the component shows assets. Never use markdown image embeds. Each generated image consumes WJ quota.",
       inputSchema: generateImageInputSchema,
-      outputSchema: imageOutputSchema,
+      outputSchema: imageJobOutputSchema,
       annotations: {
         title: "使用 WJ 生成图片",
         readOnlyHint: false,
@@ -140,8 +157,8 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
       },
       _meta: imageToolMeta({
         "openai/fileParams": ["gpt_reference_images"],
-        "openai/toolInvocation/invoking": "WJ 正在生成图片",
-        "openai/toolInvocation/invoked": "WJ 图片已生成",
+        "openai/toolInvocation/invoking": "WJ 正在提交生图任务",
+        "openai/toolInvocation/invoked": "WJ 生图任务已提交",
       }),
     },
     async (rawInput, extra) => {
@@ -149,19 +166,66 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
         const input = generateImageInputSchema.parse(rawInput);
         const subject = String(extra.authInfo?.extra?.subject ?? "wj-shared-access");
         const terminalId = String(extra.authInfo?.extra?.terminalId ?? extra.authInfo?.clientId ?? subject);
-        const result = await generation.generate(terminalId, input);
-        return await toImageToolResult(
-          imageResults,
-          logger,
-          subject,
-          result,
-          input.resolution,
-          input.aspect_ratio,
-          "generated",
-        );
+        const job = await generation.submit(subject, terminalId, input);
+        return buildImageJobToolResult(job, "accepted");
       } catch (error) {
         const message = toSafeToolError(error);
         logger.warn({ err: error, tool: "generate_image" }, "MCP image tool failed");
+        return {
+          isError: true as const,
+          content: [{ type: "text" as const, text: message }],
+        };
+      }
+    },
+  );
+
+  registerAppTool(
+    server,
+    "get_image_job",
+    {
+      title: "查询 WJ 生图任务",
+      description:
+        "Poll a WJ image job by jobId. Intended for the WJ image component. Returns current status; when wait_ms is set, long-polls up to that budget before responding.",
+      inputSchema: {
+        job_id: z.string().min(1).describe("The jobId returned by generate_image."),
+        wait_ms: z.number().int().min(0).max(45_000).optional()
+          .describe("Optional long-poll budget in milliseconds (0–45000)."),
+      },
+      outputSchema: imageJobOutputSchema,
+      annotations: {
+        title: "查询 WJ 生图任务",
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      _meta: toolSecurityMeta({
+        ui: { visibility: ["app"] },
+        "openai/visibility": "private",
+        "openai/widgetAccessible": true,
+      }),
+    },
+    async (rawInput, extra) => {
+      try {
+        const input = z.object({
+          job_id: z.string().min(1),
+          wait_ms: z.number().int().min(0).max(45_000).optional(),
+        }).parse(rawInput);
+        const subject = String(extra.authInfo?.extra?.subject ?? "wj-shared-access");
+        const job = await generation.pollJob(subject, input.job_id, input.wait_ms ?? 45_000);
+        if (!job) {
+          return {
+            isError: true as const,
+            content: [{
+              type: "text" as const,
+              text: "WJ image job was not found, has expired, or belongs to another user.",
+            }],
+          };
+        }
+        return buildImageJobToolResult(job, "polled");
+      } catch (error) {
+        const message = toSafeToolError(error);
+        logger.warn({ err: error, tool: "get_image_job" }, "MCP image job poll failed");
         return {
           isError: true as const,
           content: [{ type: "text" as const, text: message }],
@@ -606,38 +670,30 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
   return server;
 }
 
-async function toImageToolResult(
-  imageResults: ImageResultStore,
-  logger: AppLogger,
-  subject: string,
-  result: WjImageData,
-  fallbackResolution: string,
-  fallbackAspectRatio: string,
-  action: "generated",
-) {
-  const assets = result.assets.map((asset) => ({
-    type: asset.type,
-    mime_type: asset.mime_type,
-    url: asset.url,
-    ...(asset.width ? { width: asset.width } : {}),
-    ...(asset.height ? { height: asset.height } : {}),
-    ...(asset.revised_prompt ? { revised_prompt: asset.revised_prompt } : {}),
-  }));
-  const imageResult: ImageResultData = {
-    model: result.model_id,
-    resolution: result.resolution ?? fallbackResolution,
-    aspectRatio: result.aspect_ratio ?? fallbackAspectRatio,
-    ...(result.duration_ms === undefined ? {} : { durationMs: result.duration_ms }),
-    assets,
-  };
-
-  try {
-    const persisted = await imageResults.save(subject, imageResult);
-    return buildImageToolResult(persisted, action);
-  } catch (error) {
-    logger.error({ err: error, tool: "persist_image_result" }, "Failed to persist generated image result");
-    return buildImageToolResult(imageResult, action, false);
+function buildImageJobToolResult(job: ImageJobView, phase: "accepted" | "polled") {
+  const lines = [
+    phase === "accepted"
+      ? `WJ accepted image job ${job.jobId} (${job.model}, ${job.resolution}, ${job.aspectRatio}).`
+      : `WJ image job ${job.jobId} status: ${job.status}.`,
+    `Job expires at ${job.expiresAt} (20-minute window).`,
+    "The WJ image component polls this job until completion. Do not claim images are ready until assets are shown.",
+    "Never paste markdown image embeds (![](url)).",
+  ];
+  if (job.status === "completed" && job.assets.length > 0) {
+    lines.push(
+      ...(job.resultId ? [`Result ID: ${job.resultId}.`] : []),
+      "If the component is missing, paste these plain-text HTTPS links (URLs only):",
+      ...job.assets.map((asset, index) => `${index + 1}. ${asset.url}`),
+    );
+  } else if (job.status === "failed" || job.status === "timed_out") {
+    lines.push(job.error ?? `Job ended with status ${job.status}.`);
   }
+
+  return {
+    structuredContent: job,
+    content: [{ type: "text" as const, text: lines.join("\n") }],
+    _meta: { jobId: job.jobId, status: job.status },
+  };
 }
 
 function buildImageToolResult(

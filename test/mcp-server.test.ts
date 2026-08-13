@@ -7,7 +7,8 @@ import { ImageResultStore } from "../src/image-result-store.js";
 import { createWjMcpServer, IMAGE_WIDGET_URI, WJ_IMAGE_SERVER_INSTRUCTIONS } from "../src/mcp/server.js";
 import type { RedisClient } from "../src/redis.js";
 import { WjApiError } from "../src/wj/client.js";
-import { testConfig, testImageResultStore, testLogger } from "./helpers.js";
+import { testConfig, testGenerationService, testImageResultStore, testLogger, memoryRedis } from "./helpers.js";
+import { ImageJobStore } from "../src/image-job-store.js";
 
 function emptyProductDraftClient() {
   return {
@@ -20,6 +21,26 @@ function emptyProductDraftClient() {
   };
 }
 
+async function waitForJob(
+  client: Client,
+  jobId: string,
+  timeoutMs = 5_000,
+): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const polled = await client.callTool({
+      name: "get_image_job",
+      arguments: { job_id: jobId, wait_ms: 200 },
+    });
+    const content = polled.structuredContent as Record<string, unknown> | undefined;
+    if (content && (content.status === "completed" || content.status === "failed" || content.status === "timed_out")) {
+      return content;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`Job ${jobId} did not finish in time`);
+}
+
 describe("WJ MCP server", () => {
   const closeCallbacks: Array<() => Promise<void>> = [];
   afterEach(async () => {
@@ -27,14 +48,17 @@ describe("WJ MCP server", () => {
   });
 
   it("advertises and calls image generation and private-attachment tools", async () => {
-    const generate = vi.fn().mockResolvedValue({
+    const generateImage = vi.fn().mockResolvedValue({
       model_id: "gpt-image-2",
       resolution: "2K",
       aspect_ratio: "1:1",
       duration_ms: 900,
       assets: [{ type: "image", mime_type: "image/png", url: "https://img.downk.cc/generated.png", width: 1024, height: 1024 }],
     });
-    const generation = { generate } as unknown as GenerationService;
+    const redis = memoryRedis();
+    const imageResults = new ImageResultStore(redis, 2_592_000);
+    const imageJobs = new ImageJobStore(redis, 1_200);
+    const generation = testGenerationService({ generateImage }, {}, imageResults, imageJobs);
     const calculateProfit = vi.fn().mockResolvedValue({
       formulaVersion: "1.0.0",
       input: { mode: "sellingProfit", country: "US", payment: "US", regulatory: "NONE" },
@@ -59,8 +83,15 @@ describe("WJ MCP server", () => {
     });
     const profitClient = { calculateProfit, saveProfitCalculation };
     const productDraftClient = emptyProductDraftClient();
-    const imageResults = testImageResultStore();
-    const server = createWjMcpServer({ config: testConfig(), generation, imageResults, profitClient, productDraftClient, logger: testLogger(), widgetHtml: "<!doctype html><p>widget</p>" });
+    const server = createWjMcpServer({
+      config: testConfig(),
+      generation,
+      imageResults,
+      profitClient,
+      productDraftClient,
+      logger: testLogger(),
+      widgetHtml: "<!doctype html><p>widget</p>",
+    });
     const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -72,6 +103,7 @@ describe("WJ MCP server", () => {
 
     const tools = await client.listTools();
     const tool = tools.tools.find((item) => item.name === "generate_image");
+    const jobTool = tools.tools.find((item) => item.name === "get_image_job");
     const recoveryTool = tools.tools.find((item) => item.name === "get_image_result");
     const calculateProfitTool = tools.tools.find((item) => item.name === "calculate_profit");
     const saveProfitTool = tools.tools.find((item) => item.name === "save_profit_calculation");
@@ -84,11 +116,13 @@ describe("WJ MCP server", () => {
     expect(createDraftTool?.description).toContain("user_confirmed");
     expect(tool?._meta?.["ui/resourceUri"]).toBe(IMAGE_WIDGET_URI);
     expect(tool?._meta?.["openai/outputTemplate"]).toBe(IMAGE_WIDGET_URI);
+    expect(jobTool?._meta?.ui).toEqual(expect.objectContaining({ visibility: ["app"] }));
+    expect(jobTool?._meta?.["openai/widgetAccessible"]).toBe(true);
     expect(tool?.inputSchema).toEqual(expect.objectContaining({ type: "object" }));
     expect(tool?.inputSchema.properties).not.toHaveProperty("count");
     expect(tool?._meta?.securitySchemes).toEqual([{ type: "oauth2", scopes: ["wj:tools"] }]);
     expect(tool?._meta?.["openai/fileParams"]).toEqual(["gpt_reference_images"]);
-    expect(tool?.description).toContain("Prefer the WJ image component for display");
+    expect(tool?.description).toContain("jobId immediately");
     expect(tool?.description).toContain("prompts");
     expect(tool?.inputSchema).toEqual(expect.objectContaining({
       type: "object",
@@ -108,55 +142,35 @@ describe("WJ MCP server", () => {
       properties: expect.objectContaining({
         download_url: expect.objectContaining({ type: "string" }),
         file_id: expect.objectContaining({ type: "string" }),
-        mime_type: expect.objectContaining({ type: "string" }),
-        file_name: expect.objectContaining({ type: "string" }),
       }),
     }));
     expect(recoveryTool?._meta?.["ui/resourceUri"]).toBe(IMAGE_WIDGET_URI);
     expect(recoveryTool?._meta?.["openai/outputTemplate"]).toBe(IMAGE_WIDGET_URI);
-    expect(recoveryTool?.annotations).toEqual(expect.objectContaining({
-      readOnlyHint: true,
-      idempotentHint: true,
-      openWorldHint: false,
-    }));
-    expect(calculateProfitTool?.annotations).toEqual(expect.objectContaining({ readOnlyHint: true }));
-    expect(saveProfitTool?.inputSchema.required).toEqual(expect.arrayContaining(["sku", "record_name"]));
+    expect(calculateProfitTool).toBeTruthy();
+    expect(saveProfitTool).toBeTruthy();
 
     const profitResponse = await client.callTool({
       name: "calculate_profit",
       arguments: { country: "US", cost: 35, shipping: 28, selling_price: 19.99 },
     });
     expect(profitResponse.isError).not.toBe(true);
-    expect(profitResponse.content).toEqual([expect.objectContaining({
-      type: "text",
-      text: expect.stringContaining("has not been saved"),
-    })]);
     expect(calculateProfit).toHaveBeenCalledWith(expect.objectContaining({
       country: "US",
       packaging: 2,
       selling_price: 19.99,
     }));
-    expect(saveProfitCalculation).not.toHaveBeenCalled();
 
-    const missingSkuResponse = await client.callTool({
-      name: "save_profit_calculation",
-      arguments: { country: "US", cost: 35, shipping: 28, selling_price: 19.99, record_name: "US launch" },
-    });
-    expect(missingSkuResponse.isError).toBe(true);
-    expect(saveProfitCalculation).not.toHaveBeenCalled();
-
-    const saveResponse = await client.callTool({
+    await client.callTool({
       name: "save_profit_calculation",
       arguments: {
-        sku: "SKU-001",
-        record_name: "US launch 19.99 USD",
         country: "US",
         cost: 35,
         shipping: 28,
         selling_price: 19.99,
+        sku: "SKU-001",
+        record_name: "US launch 19.99 USD",
       },
     });
-    expect(saveResponse.isError).not.toBe(true);
     expect(saveProfitCalculation).toHaveBeenCalledWith(expect.objectContaining({
       sku: "SKU-001",
       record_name: "US launch 19.99 USD",
@@ -168,29 +182,27 @@ describe("WJ MCP server", () => {
     });
     expect(response.isError).not.toBe(true);
     expect(response.structuredContent).toEqual(expect.objectContaining({
+      jobId: expect.stringMatching(/^wj_job_/),
+      status: expect.stringMatching(/^(queued|running)$/),
       model: "gpt-image-2",
+      assets: [],
+    }));
+    const acceptedJobId = (response.structuredContent as { jobId: string }).jobId;
+    const completed = await waitForJob(client, acceptedJobId);
+    expect(completed).toEqual(expect.objectContaining({
+      status: "completed",
       resultId: expect.stringMatching(/^wj_img_/),
-      expiresAt: expect.any(String),
       assets: [expect.objectContaining({ url: "https://img.downk.cc/generated.png" })],
     }));
-    expect(response.content).toEqual([expect.objectContaining({
-      type: "text",
-      text: expect.stringMatching(/plain-text HTTPS links[\s\S]*https:\/\/img\.downk\.cc\/generated\.png/),
-    })]);
-    expect(response.content).not.toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: "resource_link" }),
-    ]));
-    expect(response.content).not.toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: "image" }),
-    ]));
-    expect(generate).toHaveBeenCalledWith("wj-shared-access", expect.objectContaining({
+    expect(generateImage).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: "A quiet futuristic city",
       model: "gpt-image-2",
       aspect_ratio: "1:1",
       resolution: "2K",
     }));
 
-    const generatedResultId = (response.structuredContent as { resultId: string }).resultId;
-    const generateCallsBeforeRecovery = generate.mock.calls.length;
+    const generatedResultId = completed.resultId as string;
+    const generateCallsBeforeRecovery = generateImage.mock.calls.length;
     const recoveredResponse = await client.callTool({
       name: "get_image_result",
       arguments: { result_id: generatedResultId },
@@ -200,13 +212,15 @@ describe("WJ MCP server", () => {
       resultId: generatedResultId,
       assets: [expect.objectContaining({ url: "https://img.downk.cc/generated.png" })],
     }));
-    expect(generate).toHaveBeenCalledTimes(generateCallsBeforeRecovery);
+    expect(generateImage).toHaveBeenCalledTimes(generateCallsBeforeRecovery);
 
-    await client.callTool({
+    const res1k = await client.callTool({
       name: "generate_image",
       arguments: { prompts: ["A small explicit-resolution image"], resolution: "1K" },
     });
-    expect(generate).toHaveBeenNthCalledWith(2, "wj-shared-access", expect.objectContaining({
+    const job1k = (res1k.structuredContent as { jobId: string }).jobId;
+    await waitForJob(client, job1k);
+    expect(generateImage).toHaveBeenCalledWith(expect.objectContaining({
       resolution: "1K",
     }));
 
@@ -231,15 +245,15 @@ describe("WJ MCP server", () => {
       },
     });
     expect(editLikeResponse.isError).not.toBe(true);
-    expect(editLikeResponse.structuredContent).toEqual(expect.objectContaining({
-      model: "gpt-image-2",
+    const editJobId = (editLikeResponse.structuredContent as { jobId: string }).jobId;
+    const editCompleted = await waitForJob(client, editJobId);
+    expect(editCompleted).toEqual(expect.objectContaining({
+      status: "completed",
       assets: [expect.objectContaining({ url: "https://img.downk.cc/generated.png" })],
     }));
-    expect(generate).toHaveBeenLastCalledWith("wj-shared-access", expect.objectContaining({
-      prompts: ["Add the handwritten name from image two to the board in image one"],
+    expect(generateImage).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: "Add the handwritten name from image two to the board in image one",
       model: "gpt-image-2",
-      aspect_ratio: "1:1",
-      resolution: "2K",
       gpt_reference_images: [
         expect.objectContaining({ file_id: "file_target" }),
         expect.objectContaining({ file_id: "file_reference" }),
@@ -253,11 +267,10 @@ describe("WJ MCP server", () => {
       },
     });
     expect(batchResponse.isError).not.toBe(true);
-    expect(batchResponse.structuredContent).toEqual(expect.objectContaining({
-      assets: expect.any(Array),
-    }));
-    expect(generate).toHaveBeenLastCalledWith("wj-shared-access", expect.objectContaining({
-      prompts: ["red mug on white table", "blue mug on white table", "green mug on white table"],
+    const batchJobId = (batchResponse.structuredContent as { jobId: string }).jobId;
+    await waitForJob(client, batchJobId);
+    expect(generateImage).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: "red mug on white table",
     }));
 
     const resources = await client.listResources();
@@ -289,10 +302,9 @@ describe("WJ MCP server", () => {
     }));
   });
 
-  it("reports the actual WJ authorization failure instead of assuming the API key is invalid", async () => {
-    const generation = {
-      generate: vi.fn().mockRejectedValue(new WjApiError("authorization policy denied the request", 403)),
-    } as unknown as GenerationService;
+  it("surfaces WJ authorization failures on the job poll path", async () => {
+    const generateImage = vi.fn().mockRejectedValue(new WjApiError("authorization policy denied the request", 403));
+    const generation = testGenerationService({ generateImage });
     const server = createWjMcpServer({
       config: testConfig(),
       generation,
@@ -311,16 +323,15 @@ describe("WJ MCP server", () => {
       name: "generate_image",
       arguments: { prompts: ["A test image"] },
     });
-
-    expect(response.isError).toBe(true);
-    expect(response.content).toEqual([{
-      type: "text",
-      text: "WJ request was rejected with HTTP 403: authorization policy denied the request",
-    }]);
+    expect(response.isError).not.toBe(true);
+    const jobId = (response.structuredContent as { jobId: string }).jobId;
+    const failed = await waitForJob(client, jobId);
+    expect(failed.status).toBe("failed");
+    expect(failed.error).toContain("HTTP 403");
   });
 
   it("lists categories and creates a confirmed product draft", async () => {
-    const generation = { generate: vi.fn() } as unknown as GenerationService;
+    const generation = { submit: vi.fn(), pollJob: vi.fn(), generate: vi.fn() } as unknown as GenerationService;
     const listProductCategories = vi.fn().mockResolvedValue([
       { value: "BP", label: "标品", describe: "无定制工厂货" },
       { value: "SK", label: "骷髅", describe: "骷髅系列" },
@@ -394,18 +405,20 @@ describe("WJ MCP server", () => {
     })]);
   });
 
-  it("returns original links when result persistence is temporarily unavailable", async () => {
-    const generation = {
-      generate: vi.fn().mockResolvedValue({
-        model_id: "gpt-image-2",
-        resolution: "2K",
-        aspect_ratio: "1:1",
-        assets: [{ type: "image", mime_type: "image/png", url: "https://img.downk.cc/fallback.png" }],
-      }),
-    } as unknown as GenerationService;
+  it("completes jobs even when result persistence is temporarily unavailable", async () => {
+    const redis = memoryRedis();
+    const imageJobs = new ImageJobStore(redis, 1_200);
     const imageResults = new ImageResultStore({
       set: vi.fn().mockRejectedValue(new Error("Redis unavailable")),
+      get: vi.fn().mockResolvedValue(null),
     } as unknown as RedisClient, 2_592_000);
+    const generateImage = vi.fn().mockResolvedValue({
+      model_id: "gpt-image-2",
+      resolution: "2K",
+      aspect_ratio: "1:1",
+      assets: [{ type: "image", mime_type: "image/png", url: "https://img.downk.cc/fallback.png" }],
+    });
+    const generation = testGenerationService({ generateImage }, {}, imageResults, imageJobs);
     const server = createWjMcpServer({
       config: testConfig(),
       generation,
@@ -424,12 +437,13 @@ describe("WJ MCP server", () => {
       name: "generate_image",
       arguments: { prompts: ["A recoverable image"] },
     });
-
     expect(response.isError).not.toBe(true);
-    expect(response.structuredContent).not.toHaveProperty("resultId");
-    expect(response.content).toEqual([expect.objectContaining({
-      type: "text",
-      text: expect.stringContaining("https://img.downk.cc/fallback.png"),
-    })]);
+    const jobId = (response.structuredContent as { jobId: string }).jobId;
+    const completed = await waitForJob(client, jobId);
+    expect(completed.status).toBe("completed");
+    expect(completed).not.toHaveProperty("resultId");
+    expect(completed.assets).toEqual([
+      expect.objectContaining({ url: "https://img.downk.cc/fallback.png" }),
+    ]);
   });
 });

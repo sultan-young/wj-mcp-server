@@ -4,11 +4,18 @@ import { createIcons, Download, ExternalLink } from "lucide";
 import { APP_VERSION } from "../src/version.js";
 import {
   createPersistedImageState,
+  createPersistedJobState,
+  getImageJob,
+  getImageJobId,
+  getImageJobIdKey,
   getImageResult,
   getImageResultId,
   getImageResultIdKey,
   getImageResultKey,
+  imageJobMatchesBinding,
   imageResultMatchesBinding,
+  jobToImageResult,
+  type ImageJob,
   type ImageResult,
 } from "./image-result-state.js";
 import "./styles.css";
@@ -28,6 +35,7 @@ declare global {
 
 const app = new App({ name: "WJ image result", version: APP_VERSION }, {});
 const loading = requiredElement<HTMLDivElement>("loading");
+const loadingText = requiredElement<HTMLSpanElement>("loading-text");
 const errorBox = requiredElement<HTMLDivElement>("error");
 const result = requiredElement<HTMLElement>("result");
 const thumbs = requiredElement<HTMLElement>("thumbs");
@@ -41,16 +49,26 @@ let boundResultKey: string | undefined;
 let renderedResultKey: string | undefined;
 let persistedResultKey: string | undefined;
 let recoveryInFlight: Promise<void> | undefined;
+let pollInFlight: Promise<void> | undefined;
 let compatibilityRestoreTimer: number | undefined;
+let activeJobId: string | undefined;
 
 createIcons({ icons: { Download, ExternalLink } });
 
 app.addEventListener("toolresult", (params) => {
   cancelCompatibilityRestore();
+  const job = getImageJob(params);
+  if (job) {
+    void handleJobUpdate(job, true);
+    return;
+  }
   const imageResult = getImageResult(params);
   if (params.isError || !imageResult) {
-    if (!current && !params.isError) void recoverFromResultId(getImageResultId(params));
-    else if (!current) showResultUnavailable();
+    if (!current && !params.isError) {
+      const jobId = getImageJobId(params);
+      if (jobId) void pollJobUntilDone(jobId, true);
+      else void recoverFromResultId(getImageResultId(params));
+    } else if (!current) showResultUnavailable();
     return;
   }
   if (!bindImageResult(imageResult)) return;
@@ -103,6 +121,12 @@ function restoreFromOpenAiGlobals(bridge: OpenAiBridge | undefined): void {
     return;
   }
 
+  const stateJobId = getImageJobId(bridge.widgetState);
+  if (stateJobId) {
+    void pollJobUntilDone(stateJobId, false);
+    return;
+  }
+
   const stateResultId = getImageResultId(bridge.widgetState);
   if (stateResultId) {
     void recoverFromResultId(stateResultId);
@@ -110,6 +134,78 @@ function restoreFromOpenAiGlobals(bridge: OpenAiBridge | undefined): void {
   }
 
   scheduleCompatibilityRestore(bridge);
+}
+
+async function handleJobUpdate(job: ImageJob, persist: boolean): Promise<void> {
+  if (!imageJobMatchesBinding(boundResultKey, job.jobId)) return;
+  boundResultKey ??= getImageJobIdKey(job.jobId);
+  activeJobId = job.jobId;
+
+  if (job.status === "completed") {
+    const imageResult = jobToImageResult(job);
+    if (imageResult) {
+      render(imageResult, persist);
+      return;
+    }
+  }
+
+  if (job.status === "failed" || job.status === "timed_out") {
+    showJobFailed(job.error ?? `任务 ${job.status}`);
+    return;
+  }
+
+  showJobLoading(job);
+  if (persist) window.openai?.setWidgetState?.(createPersistedJobState(job.jobId));
+  await pollJobUntilDone(job.jobId, persist);
+}
+
+async function pollJobUntilDone(jobId: string, persist: boolean): Promise<void> {
+  if (!imageJobMatchesBinding(boundResultKey, jobId)) return;
+  boundResultKey ??= getImageJobIdKey(jobId);
+  activeJobId = jobId;
+  if (pollInFlight) return;
+
+  pollInFlight = (async () => {
+    showJobLoading({ jobId, status: "running", model: "WJ" });
+    const deadline = Date.now() + 20 * 60 * 1000;
+    while (Date.now() < deadline) {
+      try {
+        const polled = await app.callServerTool({
+          name: "get_image_job",
+          arguments: { job_id: jobId, wait_ms: 45_000 },
+        });
+        const resolved = getImageJob(polled);
+        if (!resolved) {
+          const imageResult = getImageResult(polled);
+          if (imageResult) {
+            render(imageResult, persist);
+            return;
+          }
+          continue;
+        }
+        if (resolved.status === "completed") {
+          const imageResult = jobToImageResult(resolved);
+          if (imageResult) {
+            render(imageResult, persist);
+            return;
+          }
+        }
+        if (resolved.status === "failed" || resolved.status === "timed_out") {
+          showJobFailed(resolved.error ?? `任务 ${resolved.status}`);
+          return;
+        }
+        showJobLoading(resolved);
+        if (persist) window.openai?.setWidgetState?.(createPersistedJobState(jobId));
+      } catch {
+        await sleep(2_000);
+      }
+    }
+    showJobFailed("生图任务超过 20 分钟仍未完成。");
+  })().finally(() => {
+    pollInFlight = undefined;
+  });
+
+  await pollInFlight;
 }
 
 async function recoverFromResultId(resultId: string | undefined): Promise<void> {
@@ -186,7 +282,8 @@ function showIndex(nextIndex: number): void {
 function maybePersist(data: ImageResult, persist: boolean, resultKey: string): void {
   if (!persist || persistedResultKey === resultKey) return;
   persistedResultKey = resultKey;
-  window.openai?.setWidgetState?.(createPersistedImageState(data));
+  if (activeJobId) window.openai?.setWidgetState?.(createPersistedJobState(activeJobId, data));
+  else window.openai?.setWidgetState?.(createPersistedImageState(data));
 }
 
 function bindImageResult(imageResult: ImageResult): boolean {
@@ -208,9 +305,19 @@ function scheduleCompatibilityRestore(bridge: OpenAiBridge): void {
     compatibilityRestoreTimer = undefined;
     if (current || boundResultKey) return;
     const sources = [bridge.toolOutput, bridge.toolResponseMetadata];
+    const restoredJob = sources.map(getImageJob).find((value): value is ImageJob => value !== undefined);
+    if (restoredJob) {
+      void handleJobUpdate(restoredJob, false);
+      return;
+    }
     const restoredResult = sources.map(getImageResult).find((value): value is ImageResult => value !== undefined);
     if (restoredResult && bindImageResult(restoredResult)) {
       render(restoredResult, false);
+      return;
+    }
+    const jobId = sources.map(getImageJobId).find((value): value is string => value !== undefined);
+    if (jobId) {
+      void pollJobUntilDone(jobId, false);
       return;
     }
     void recoverFromResultId(sources.map(getImageResultId).find((value): value is string => value !== undefined));
@@ -243,6 +350,20 @@ function currentAsset() {
   return current?.assets[activeIndex];
 }
 
+function showJobLoading(job: Pick<ImageJob, "jobId" | "status" | "model">): void {
+  loading.hidden = false;
+  errorBox.hidden = true;
+  result.hidden = true;
+  loadingText.textContent = `WJ 正在生成图片（${job.status}）…`;
+}
+
+function showJobFailed(message: string): void {
+  loading.hidden = true;
+  result.hidden = true;
+  errorBox.textContent = message;
+  errorBox.hidden = false;
+}
+
 function showResultUnavailable(): void {
   loading.hidden = true;
   result.hidden = true;
@@ -258,6 +379,10 @@ function applyHostContext(context: ReturnType<App["getHostContext"]>): void {
 function formatDuration(durationMs?: number): string | undefined {
   if (durationMs === undefined) return undefined;
   return `耗时 ${(durationMs / 1000).toFixed(durationMs >= 10_000 ? 0 : 1)}s`;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function requiredElement<T extends HTMLElement>(id: string): T {
