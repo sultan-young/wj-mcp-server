@@ -1,5 +1,5 @@
 import { App, applyDocumentTheme, applyHostStyleVariables } from "@modelcontextprotocol/ext-apps";
-import { createIcons, Download, ExternalLink } from "lucide";
+import { createIcons, ExternalLink } from "lucide";
 
 import { APP_VERSION } from "../src/version.js";
 import {
@@ -43,7 +43,6 @@ const thumbs = requiredElement<HTMLElement>("thumbs");
 const model = requiredElement<HTMLElement>("model");
 const details = requiredElement<HTMLSpanElement>("details");
 const openButton = requiredElement<HTMLButtonElement>("open");
-const downloadButton = requiredElement<HTMLButtonElement>("download");
 let current: ImageResult | undefined;
 let activeIndex = 0;
 let boundResultKey: string | undefined;
@@ -54,7 +53,7 @@ let pollInFlight: Promise<void> | undefined;
 let compatibilityRestoreTimer: number | undefined;
 let activeJobId: string | undefined;
 
-createIcons({ icons: { Download, ExternalLink } });
+createIcons({ icons: { ExternalLink } });
 
 app.addEventListener("toolresult", (params) => {
   cancelCompatibilityRestore();
@@ -87,37 +86,6 @@ window.addEventListener("keydown", (event) => {
 openButton.addEventListener("click", async () => {
   const url = currentAsset()?.url;
   if (url) await app.openLink({ url });
-});
-
-downloadButton.addEventListener("click", async () => {
-  const asset = currentAsset();
-  if (!asset) return;
-  const filename = `wj-generated-image-${activeIndex + 1}${extensionForMime(asset.mime_type)}`;
-  const mimeType = asset.mime_type ?? "image/png";
-
-  // ChatGPT often does not implement host downloadFile (-32601); fall back to blob download.
-  try {
-    const result = await app.downloadFile({
-      contents: [
-        {
-          type: "resource_link",
-          uri: asset.url,
-          name: filename,
-          title: `WJ 生成图片 ${activeIndex + 1}`,
-          mimeType,
-        },
-      ],
-    });
-    if (!result?.isError) return;
-  } catch {
-    // continue to browser fallback
-  }
-
-  try {
-    await downloadViaBrowser(asset.url, filename, mimeType);
-  } catch {
-    await app.openLink({ url: asset.url });
-  }
 });
 
 await app.connect();
@@ -363,6 +331,7 @@ function updateChrome(data: ImageResult): void {
     total > 1 ? `${activeIndex + 1}/${total}` : undefined,
     asset?.width && asset?.height ? `${asset.width}×${asset.height}` : undefined,
     formatDuration(asset?.duration_ms ?? data.durationMs),
+    data.failureCount ? `失败 ${data.failureCount}` : undefined,
   ].filter(Boolean).join(" · ");
   loading.hidden = true;
   errorBox.hidden = true;
@@ -402,33 +371,6 @@ function applyHostContext(context: ReturnType<App["getHostContext"]>): void {
 function formatDuration(durationMs?: number): string | undefined {
   if (durationMs === undefined) return undefined;
   return `耗时 ${(durationMs / 1000).toFixed(durationMs >= 10_000 ? 0 : 1)}s`;
-}
-
-async function downloadViaBrowser(url: string, filename: string, mimeType: string): Promise<void> {
-  const response = await fetch(url, { mode: "cors", credentials: "omit" });
-  if (!response.ok) throw new Error(`Download fetch failed (${response.status})`);
-  const blob = await response.blob();
-  const fileBlob = blob.type ? blob : new Blob([blob], { type: mimeType });
-  const objectUrl = URL.createObjectURL(fileBlob);
-  try {
-    const anchor = document.createElement("a");
-    anchor.href = objectUrl;
-    anchor.download = filename;
-    anchor.rel = "noopener";
-    document.body.append(anchor);
-    anchor.click();
-    anchor.remove();
-  } finally {
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000);
-  }
-}
-
-function extensionForMime(mimeType: string | undefined): string {
-  if (!mimeType) return ".png";
-  if (mimeType.includes("jpeg") || mimeType.includes("jpg")) return ".jpg";
-  if (mimeType.includes("webp")) return ".webp";
-  if (mimeType.includes("gif")) return ".gif";
-  return ".png";
 }
 
 function sleep(ms: number): Promise<void> {

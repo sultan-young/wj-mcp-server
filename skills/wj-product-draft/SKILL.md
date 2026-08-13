@@ -16,8 +16,9 @@ Use WJ product-draft tools to help users reserve SKUs and fill draft fields. Nev
 3. Present the plan to the user: chosen category (`value` + `label`), single vs group, proposed `variantSerial` list, and that create will **immediately reserve** a SKU.
 4. Wait for **explicit confirmation** ("确认创建草稿" / "可以建"). Asking how to encode is not confirmation.
 5. Only then call `create_product_draft` with `user_confirmed: true`.
-6. Optionally `generate_image` / `update_product_draft` to add images and fields; `validate_product_draft` to list missing ERP-required fields.
-7. Tell the user the reserved SKU is ready for procurement, but the product is still a draft. **ERP create + Etsy listing remain manual.** Do not call any publish tool (none is exposed).
+6. When product images are available in the conversation (user photos or WJ-generated product images), **also upload those product images into the draft** via the draft tools—do not leave the draft without product images if images exist.
+7. Optionally `update_product_draft` for other fields; `validate_product_draft` to list missing ERP-required fields.
+8. Tell the user the reserved SKU is ready for procurement, but the product is still a draft. **ERP create + Etsy listing remain manual.** Do not call any publish tool (none is exposed).
 
 ## Update caveats
 

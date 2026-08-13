@@ -139,7 +139,6 @@ main {
   gap: 4px;
 }
 
-#download,
 #open {
   width: 36px;
   height: 36px;
@@ -152,18 +151,15 @@ main {
   cursor: pointer;
 }
 
-#download:hover,
 #open:hover {
   background: var(--color-background-secondary, #eef2ef);
 }
 
-#download:focus-visible,
 #open:focus-visible {
   outline: 2px solid var(--color-ring-primary, #16845d);
   outline-offset: 2px;
 }
 
-#download svg,
 #open svg {
   width: 18px;
   height: 18px;

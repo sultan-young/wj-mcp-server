@@ -9,6 +9,11 @@ const JOB_KEY_PREFIX = "wj:mcp:image-job:";
 
 export const imageJobStatusSchema = z.enum(["queued", "running", "completed", "failed", "timed_out"]);
 
+export const imagePromptFailureSchema = z.object({
+  index: z.number().int().nonnegative(),
+  error: z.string().min(1),
+});
+
 export const imageJobRecordSchema = z.object({
   jobId: z.string().min(1),
   subject: z.string().min(1),
@@ -24,6 +29,7 @@ export const imageJobRecordSchema = z.object({
   error: z.string().optional(),
   durationMs: z.number().int().nonnegative().optional(),
   assets: z.array(imageAssetSchema).default([]),
+  failures: z.array(imagePromptFailureSchema).default([]),
   resultId: z.string().optional(),
   resultCreatedAt: z.string().datetime().optional(),
   resultExpiresAt: z.string().datetime().optional(),
@@ -31,6 +37,7 @@ export const imageJobRecordSchema = z.object({
 
 export type ImageJobRecord = z.infer<typeof imageJobRecordSchema>;
 export type ImageJobStatus = z.infer<typeof imageJobStatusSchema>;
+export type ImagePromptFailure = z.infer<typeof imagePromptFailureSchema>;
 
 /** Public job snapshot returned to MCP clients / widget (no raw input). */
 export type ImageJobView = {
@@ -45,6 +52,7 @@ export type ImageJobView = {
   error?: string;
   durationMs?: number;
   assets: z.infer<typeof imageAssetSchema>[];
+  failures: ImagePromptFailure[];
   resultId?: string;
   resultCreatedAt?: string;
   resultExpiresAt?: string;
@@ -76,6 +84,7 @@ export class ImageJobStore {
       updatedAt: now.toISOString(),
       expiresAt: new Date(now.getTime() + this.ttlSeconds * 1000).toISOString(),
       assets: [],
+      failures: [],
     });
     await this.write(record);
     return record;
@@ -106,6 +115,7 @@ export class ImageJobStore {
     jobId: string,
     payload: {
       assets: ImageJobRecord["assets"];
+      failures?: ImagePromptFailure[];
       model: string;
       resolution: string;
       aspectRatio: string;
@@ -113,6 +123,7 @@ export class ImageJobStore {
       resultId?: string;
       resultCreatedAt?: string;
       resultExpiresAt?: string;
+      error?: string;
     },
   ): Promise<ImageJobRecord | undefined> {
     const record = await this.read(jobId);
@@ -126,11 +137,12 @@ export class ImageJobStore {
       aspectRatio: payload.aspectRatio,
       durationMs: payload.durationMs,
       assets: payload.assets,
+      failures: payload.failures ?? [],
       resultId: payload.resultId,
       resultCreatedAt: payload.resultCreatedAt,
       resultExpiresAt: payload.resultExpiresAt,
       updatedAt: new Date().toISOString(),
-      error: undefined,
+      ...(payload.error ? { error: payload.error } : { error: undefined }),
     });
     await this.write(next);
     return next;
@@ -161,6 +173,7 @@ export class ImageJobStore {
       updatedAt: record.updatedAt,
       expiresAt: record.expiresAt,
       assets: record.assets,
+      failures: record.failures ?? [],
       ...(record.error ? { error: record.error } : {}),
       ...(record.durationMs === undefined ? {} : { durationMs: record.durationMs }),
       ...(record.resultId ? { resultId: record.resultId } : {}),

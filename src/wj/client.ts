@@ -65,6 +65,14 @@ export class WjClient {
     };
 
     const startedAt = Date.now();
+    this.logger.info({
+      model: input.model,
+      resolution: input.resolution,
+      aspectRatio: input.aspect_ratio,
+      promptChars: input.prompt.length,
+      referenceCount: inputImages?.length ?? 0,
+      timeoutMs: this.config.WJ_REQUEST_TIMEOUT_MS,
+    }, "WJ image request start");
     let response: Response;
     try {
       response = await this.fetchImpl(endpoint, {
@@ -80,6 +88,11 @@ export class WjClient {
       });
     } catch (error) {
       const isTimeout = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+      this.logger.warn({
+        err: error,
+        durationMs: Date.now() - startedAt,
+        timedOut: isTimeout,
+      }, "WJ image request transport failed");
       throw new WjApiError(isTimeout ? "WJ image generation timed out" : "Unable to reach the WJ image service");
     }
 
@@ -88,18 +101,45 @@ export class WjClient {
     try {
       json = JSON.parse(rawBody);
     } catch {
+      this.logger.warn({
+        status: response.status,
+        durationMs: Date.now() - startedAt,
+        bodyPreview: rawBody.slice(0, 240),
+      }, "WJ returned a non-JSON image response");
       throw new WjApiError("WJ returned a non-JSON response", response.status);
     }
 
     if (!response.ok) {
       const upstreamMessage = extractUpstreamMessage(json);
-      this.logger.warn({ status: response.status, durationMs: Date.now() - startedAt }, "WJ image request failed");
+      this.logger.warn({
+        status: response.status,
+        durationMs: Date.now() - startedAt,
+        upstreamMessage,
+        bodyKeys: objectKeys(json),
+      }, "WJ image request failed");
       throw new WjApiError(upstreamMessage ?? `WJ request failed with HTTP ${response.status}`, response.status);
     }
 
     const parsed = wjImageResponseSchema.safeParse(json);
     if (!parsed.success || parsed.data.success === false) {
-      this.logger.warn({ status: response.status, durationMs: Date.now() - startedAt }, "Invalid WJ image response");
+      this.logger.warn({
+        status: response.status,
+        durationMs: Date.now() - startedAt,
+        successFlag: parsed.success ? parsed.data.success : undefined,
+        upstreamMessage: parsed.success ? parsed.data.message : undefined,
+        zodIssues: parsed.success
+          ? undefined
+          : parsed.error.issues.slice(0, 12).map((issue) => ({
+            path: issue.path.join("."),
+            code: issue.code,
+            message: issue.message,
+          })),
+        bodyKeys: objectKeys(json),
+        dataKeys: objectKeys((json as { data?: unknown } | null)?.data),
+        assetCount: Array.isArray((json as { data?: { assets?: unknown } } | null)?.data?.assets)
+          ? ((json as { data: { assets: unknown[] } }).data.assets.length)
+          : undefined,
+      }, "Invalid WJ image response");
       throw new WjApiError(parsed.success ? parsed.data.message ?? "WJ reported generation failure" : "WJ returned an invalid image response", response.status);
     }
 
@@ -114,6 +154,7 @@ export class WjClient {
         model: parsed.data.data.model_id,
         assetCount: parsed.data.data.assets.length,
         durationMs: Date.now() - startedAt,
+        hasUrls: parsed.data.data.assets.every((asset) => Boolean(asset.url)),
       },
       "WJ image generated",
     );
@@ -276,4 +317,9 @@ function extractUpstreamMessage(body: unknown): string | undefined {
     if (typeof value === "string" && value.length <= 500) return value;
   }
   return undefined;
+}
+
+function objectKeys(value: unknown): string[] | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return Object.keys(value).slice(0, 24);
 }

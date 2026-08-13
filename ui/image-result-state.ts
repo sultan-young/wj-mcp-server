@@ -12,6 +12,7 @@ export type ImageResult = {
   aspectRatio?: string;
   durationMs?: number;
   assets: ImageAsset[];
+  failureCount?: number;
   resultId?: string;
   createdAt?: string;
   expiresAt?: string;
@@ -25,6 +26,7 @@ export type ImageJob = {
   aspectRatio?: string;
   durationMs?: number;
   assets: ImageAsset[];
+  failures?: Array<{ index: number; error: string }>;
   resultId?: string;
   error?: string;
   createdAt?: string;
@@ -211,6 +213,7 @@ export function jobToImageResult(job: ImageJob): ImageResult | undefined {
     aspectRatio: job.aspectRatio,
     durationMs: job.durationMs,
     assets: job.assets,
+    failureCount: job.failures?.length ?? 0,
     resultId: job.resultId,
     createdAt: job.createdAt,
     expiresAt: job.expiresAt,

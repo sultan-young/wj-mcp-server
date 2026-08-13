@@ -5,7 +5,7 @@ import { z } from "zod";
 import { WJ_MCP_SCOPE } from "../auth/provider.js";
 import type { AppConfig } from "../config.js";
 import type { GenerationService } from "../generation-service.js";
-import { imageJobStatusSchema, type ImageJobView } from "../image-job-store.js";
+import { imageJobStatusSchema, imagePromptFailureSchema, type ImageJobView } from "../image-job-store.js";
 import { type ImageResultData, ImageResultStore, type PersistedImageResult } from "../image-result-store.js";
 import { UsageLimitError } from "../limits.js";
 import type { AppLogger } from "../logger.js";
@@ -71,7 +71,7 @@ function widgetResourceMeta(config: AppConfig) {
         connectDomains: resourceDomains,
       },
     },
-    "openai/widgetDescription": "Displays WJ-generated images inline with open/download actions and original HTTPS links.",
+    "openai/widgetDescription": "Displays WJ-generated images inline with an open-original action and original HTTPS links.",
     "openai/widgetDomain": config.publicBaseUrl.origin,
     "openai/widgetCSP": {
       resource_domains: resourceDomains,
@@ -111,6 +111,7 @@ const imageJobOutputSchema = {
   error: z.string().optional(),
   durationMs: z.number().int().nonnegative().optional(),
   assets: z.array(imageAssetSchema),
+  failures: z.array(imagePromptFailureSchema).optional(),
   resultId: z.string().optional(),
   resultCreatedAt: z.string().datetime().optional(),
   resultExpiresAt: z.string().datetime().optional(),
@@ -765,11 +766,21 @@ function buildImageJobToolResult(job: ImageJobView, phase: "accepted" | "polled"
   if (job.status === "completed" && job.assets.length > 0) {
     lines.push(
       ...(job.resultId ? [`Result ID: ${job.resultId}.`] : []),
+      `Succeeded: ${job.assets.length} image(s).`,
+      ...(job.failures?.length
+        ? [
+          `Failed: ${job.failures.length} image(s).`,
+          ...job.failures.slice(0, 10).map((failure) => `- prompt #${failure.index + 1}: ${failure.error}`),
+        ]
+        : []),
       "If the component is missing, paste these plain-text HTTPS links (URLs only):",
       ...job.assets.map((asset, index) => `${index + 1}. ${asset.url}`),
     );
   } else if (job.status === "failed" || job.status === "timed_out") {
     lines.push(job.error ?? `Job ended with status ${job.status}.`);
+    if (job.failures?.length) {
+      lines.push(...job.failures.slice(0, 10).map((failure) => `- prompt #${failure.index + 1}: ${failure.error}`));
+    }
   }
 
   return {

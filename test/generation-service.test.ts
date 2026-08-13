@@ -147,14 +147,74 @@ describe("GenerationService", () => {
 
     expect(generateImage).toHaveBeenCalledTimes(3);
     expect(maximumActive).toBe(2);
-    expect(result.assets).toHaveLength(3);
-    expect(result.duration_ms).toBeUndefined();
-    expect(result.assets.map((asset) => asset.duration_ms)).toEqual([10, 20, 30]);
-    expect(result.assets.map((asset) => asset.url)).toEqual([
+    expect(result.result?.assets).toHaveLength(3);
+    expect(result.result?.duration_ms).toBeUndefined();
+    expect(result.result?.assets.map((asset) => asset.duration_ms)).toEqual([10, 20, 30]);
+    expect(result.result?.assets.map((asset) => asset.url)).toEqual([
       "https://img.downk.cc/one.png",
       "https://img.downk.cc/two.png",
       "https://img.downk.cc/three.png",
     ]);
+    expect(result.failures).toEqual([]);
+  });
+
+  it("keeps successful images when some prompts fail", async () => {
+    const generateImage = vi.fn(async (input: { prompt: string }) => {
+      if (input.prompt === "two") throw new Error("upstream 504");
+      return {
+        model_id: "gpt-image-2",
+        resolution: "2K",
+        aspect_ratio: "1:1",
+        assets: [{
+          type: "image",
+          mime_type: "image/png",
+          url: `https://img.downk.cc/${encodeURIComponent(input.prompt)}.png`,
+        }],
+      };
+    });
+    const service = testGenerationService({ generateImage }, { IMAGE_MAX_CONCURRENCY: "3" });
+    const batch = await service.generate("terminal", {
+      prompts: ["one", "two", "three"],
+      model: "gpt-image-2",
+      aspect_ratio: "1:1",
+      resolution: "2K",
+    });
+    expect(batch.result?.assets.map((asset) => asset.url)).toEqual([
+      "https://img.downk.cc/one.png",
+      "https://img.downk.cc/three.png",
+    ]);
+    expect(batch.failures).toEqual([
+      { index: 1, error: "upstream 504" },
+    ]);
+  });
+
+  it("submits a job with partial prompt failures as completed", async () => {
+    const { WjApiError } = await import("../src/wj/client.js");
+    const generateImage = vi.fn(async (input: { prompt: string }) => {
+      if (input.prompt === "bad") throw new WjApiError("WJ request failed with HTTP 400", 400);
+      return {
+        model_id: "gpt-image-2",
+        resolution: "2K",
+        aspect_ratio: "1:1",
+        assets: [{ type: "image", mime_type: "image/png", url: "https://img.downk.cc/ok.png" }],
+      };
+    });
+    const service = testGenerationService({ generateImage });
+    const accepted = await service.submit("subject", "terminal", {
+      prompts: ["ok", "bad"],
+      model: "gpt-image-2",
+      aspect_ratio: "1:1",
+      resolution: "2K",
+    });
+    const completed = await service.pollJob("subject", accepted.jobId, 5_000);
+    expect(completed?.status).toBe("completed");
+    expect(completed?.assets).toEqual([
+      expect.objectContaining({ url: "https://img.downk.cc/ok.png" }),
+    ]);
+    expect(completed?.failures).toEqual([
+      { index: 1, error: "WJ request failed with HTTP 400" },
+    ]);
+    expect(completed?.error).toContain("1 of 2");
   });
 
   it("submits a job immediately and completes via polling", async () => {
