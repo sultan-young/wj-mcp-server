@@ -9,6 +9,17 @@ import type { RedisClient } from "../src/redis.js";
 import { WjApiError } from "../src/wj/client.js";
 import { testConfig, testImageResultStore, testLogger } from "./helpers.js";
 
+function emptyProductDraftClient() {
+  return {
+    listProductCategories: vi.fn(),
+    createProductDraft: vi.fn(),
+    updateProductDraft: vi.fn(),
+    getProductDraft: vi.fn(),
+    listProductDrafts: vi.fn(),
+    validateProductDraft: vi.fn(),
+  };
+}
+
 describe("WJ MCP server", () => {
   const closeCallbacks: Array<() => Promise<void>> = [];
   afterEach(async () => {
@@ -47,14 +58,17 @@ describe("WJ MCP server", () => {
       calculatedResults: { "Profit (CNY)": "56.39" },
     });
     const profitClient = { calculateProfit, saveProfitCalculation };
+    const productDraftClient = emptyProductDraftClient();
     const imageResults = testImageResultStore();
-    const server = createWjMcpServer({ config: testConfig(), generation, imageResults, profitClient, logger: testLogger(), widgetHtml: "<!doctype html><p>widget</p>" });
+    const server = createWjMcpServer({ config: testConfig(), generation, imageResults, profitClient, productDraftClient, logger: testLogger(), widgetHtml: "<!doctype html><p>widget</p>" });
     const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
     closeCallbacks.push(async () => { await client.close(); await server.close(); });
 
     expect(client.getInstructions()).toBe(WJ_IMAGE_SERVER_INSTRUCTIONS);
+    expect(WJ_IMAGE_SERVER_INSTRUCTIONS).toContain("list_product_categories");
+    expect(WJ_IMAGE_SERVER_INSTRUCTIONS).toContain("create_product_draft");
 
     const tools = await client.listTools();
     const tool = tools.tools.find((item) => item.name === "generate_image");
@@ -62,7 +76,12 @@ describe("WJ MCP server", () => {
     const recoveryTool = tools.tools.find((item) => item.name === "get_image_result");
     const calculateProfitTool = tools.tools.find((item) => item.name === "calculate_profit");
     const saveProfitTool = tools.tools.find((item) => item.name === "save_profit_calculation");
+    const listCategoriesTool = tools.tools.find((item) => item.name === "list_product_categories");
+    const createDraftTool = tools.tools.find((item) => item.name === "create_product_draft");
     expect(tools.tools.map((item) => item.name)).not.toContain("generate_images");
+    expect(tools.tools.map((item) => item.name)).not.toContain("publish_product_draft");
+    expect(listCategoriesTool).toBeTruthy();
+    expect(createDraftTool?.description).toContain("user_confirmed");
     expect(tool?._meta?.["ui/resourceUri"]).toBe(IMAGE_WIDGET_URI);
     expect(tool?._meta?.["openai/outputTemplate"]).toBe(IMAGE_WIDGET_URI);
     expect(tool?.inputSchema).toEqual(expect.objectContaining({ type: "object" }));
@@ -265,6 +284,7 @@ describe("WJ MCP server", () => {
       generation,
       imageResults: testImageResultStore(),
       profitClient: { calculateProfit: vi.fn(), saveProfitCalculation: vi.fn() },
+      productDraftClient: emptyProductDraftClient(),
       logger: testLogger(),
       widgetHtml: "<!doctype html><p>widget</p>",
     });
@@ -285,6 +305,81 @@ describe("WJ MCP server", () => {
     }]);
   });
 
+  it("lists categories and creates a confirmed product draft", async () => {
+    const generation = { generate: vi.fn() } as unknown as GenerationService;
+    const listProductCategories = vi.fn().mockResolvedValue([
+      { value: "BP", label: "标品", describe: "无定制工厂货" },
+      { value: "SK", label: "骷髅", describe: "骷髅系列" },
+    ]);
+    const createProductDraft = vi.fn().mockResolvedValue({
+      id: "draft-1",
+      sku: "BP-G1001",
+      reservedSku: "BP-G1001",
+      category: "BP",
+      isGroup: true,
+      publishStatus: "draft",
+      isDraft: true,
+      reservedChildSkus: ["BP-G1001-R", "BP-G1001-G"],
+    });
+    const productDraftClient = {
+      ...emptyProductDraftClient(),
+      listProductCategories,
+      createProductDraft,
+    };
+    const server = createWjMcpServer({
+      config: testConfig(),
+      generation,
+      imageResults: testImageResultStore(),
+      profitClient: { calculateProfit: vi.fn(), saveProfitCalculation: vi.fn() },
+      productDraftClient,
+      logger: testLogger(),
+      widgetHtml: "<!doctype html><p>widget</p>",
+    });
+    const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    closeCallbacks.push(async () => { await client.close(); await server.close(); });
+
+    const categoriesResponse = await client.callTool({ name: "list_product_categories", arguments: {} });
+    expect(categoriesResponse.isError).not.toBe(true);
+    expect(categoriesResponse.structuredContent).toEqual({
+      categories: [
+        { value: "BP", label: "标品", describe: "无定制工厂货" },
+        { value: "SK", label: "骷髅", describe: "骷髅系列" },
+      ],
+    });
+
+    const rejected = await client.callTool({
+      name: "create_product_draft",
+      arguments: { category: "BP", isGroup: true },
+    });
+    expect(rejected.isError).toBe(true);
+    expect(createProductDraft).not.toHaveBeenCalled();
+
+    const created = await client.callTool({
+      name: "create_product_draft",
+      arguments: {
+        category: "BP",
+        isGroup: true,
+        user_confirmed: true,
+        children: [
+          { variantSerial: "R", stock: 0 },
+          { variantSerial: "G", stock: 0 },
+        ],
+      },
+    });
+    expect(created.isError).not.toBe(true);
+    expect(createProductDraft).toHaveBeenCalledWith(expect.objectContaining({
+      category: "BP",
+      isGroup: true,
+      user_confirmed: true,
+    }));
+    expect(created.content).toEqual([expect.objectContaining({
+      type: "text",
+      text: expect.stringContaining("BP-G1001"),
+    })]);
+  });
+
   it("returns original links when result persistence is temporarily unavailable", async () => {
     const generation = {
       generate: vi.fn().mockResolvedValue({
@@ -302,6 +397,7 @@ describe("WJ MCP server", () => {
       generation,
       imageResults,
       profitClient: { calculateProfit: vi.fn(), saveProfitCalculation: vi.fn() },
+      productDraftClient: emptyProductDraftClient(),
       logger: testLogger(),
       widgetHtml: "<!doctype html><p>widget</p>",
     });

@@ -98,7 +98,15 @@ export async function createApplication(dependencies: AppDependencies) {
   const mcpBody = express.json({ limit: "1mb" });
 
   app.post("/mcp", authenticate, mcpBody, asyncHandler(async (req, res) => {
-    const mcpServer = createWjMcpServer({ config, generation, imageResults, profitClient: wjClient, logger, widgetHtml });
+    const mcpServer = createWjMcpServer({
+      config,
+      generation,
+      imageResults,
+      profitClient: wjClient,
+      productDraftClient: wjClient,
+      logger,
+      widgetHtml,
+    });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on("close", () => void transport.close());
     await mcpServer.connect(transport);

@@ -169,4 +169,33 @@ describe("WjClient", () => {
       recordName: "US launch 19.99 USD",
     }));
   });
+
+  it("lists product categories and creates a draft without sending user_confirmed upstream", async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        data: [{ value: "BP", label: "标品", describe: "工厂货" }],
+      }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        data: { id: "d1", sku: "BP-10001", reservedSku: "BP-10001", category: "BP", publishStatus: "draft", isDraft: true },
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+    const client = new WjClient(testConfig(), testLogger(), fetchMock);
+
+    const categories = await client.listProductCategories();
+    expect(categories).toEqual([{ value: "BP", label: "标品", describe: "工厂货" }]);
+
+    await client.createProductDraft({
+      category: "BP",
+      user_confirmed: true,
+      nameCn: "测试",
+    });
+
+    const [createUrl, createInit] = fetchMock.mock.calls[1] ?? [];
+    expect(String(createUrl)).toBe("https://wj.example.com/api/v1/products/drafts/create");
+    expect(JSON.parse(String(createInit?.body))).toEqual({
+      category: "BP",
+      nameCn: "测试",
+    });
+  });
 });

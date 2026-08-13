@@ -17,6 +17,13 @@
 录入必须使用用户提供的真实 SKU；缺少 SKU 时先询问，禁止猜测或虚构。
 录入名称优先使用用户给出的名称；用户未命名时，根据国家、商品语境和价格自动生成简短易辨认的 record_name。
 save_profit_calculation 会在 WJ 服务端重新计算并保存，不得把模型自行计算的利润数值当作保存结果。
+
+当用户要求创建商品草稿、占用 SKU、补图或录入规格时：
+先调用 list_product_categories，根据返回的 label/describe 选择 category.value，禁止凭记忆编造品类前缀。
+有多颜色/尺寸等需分库存的规格时使用商品组（isGroup + variantSerial）；单一规格用普通商品。
+先向用户展示拟定品类、单品/组、变体后缀，并说明创建会立即占号；只有用户明确确认后才调用 create_product_draft（user_confirmed=true）。
+数量用「SKU * N」展示，包装/形态用括号备注；这些不要写入 Product.sku，备注可写入 notes。
+MCP 不提供 publish；正式创建商品与 Etsy 上架由用户在 ERP/店铺侧手工完成。
 ```
 
 ## 边界

@@ -17,6 +17,17 @@ import {
   saveProfitToolInputSchema,
 } from "../wj/profit-types.js";
 import {
+  createProductDraftInputSchema,
+  getProductDraftInputSchema,
+  listProductCategoriesInputSchema,
+  listProductDraftsInputSchema,
+  productCategorySchema,
+  productDraftSchema,
+  updateProductDraftInputSchema,
+  validateProductDraftInputSchema,
+  validateProductDraftResultSchema,
+} from "../wj/product-draft-types.js";
+import {
   aspectRatioSchema,
   editImageInputSchema,
   generateImageInputSchema,
@@ -28,7 +39,9 @@ import {
 export const IMAGE_WIDGET_URI = "ui://wj/image-result-v2.html";
 export const WJ_IMAGE_SERVER_INSTRUCTIONS = `Use generate_image immediately when the user explicitly asks to use WJ, WJ image generation, or 无界生图. When the user requests multiple images, make one independent generate_image call per image and dispatch all calls concurrently in the same tool-call turn; never wait for one image before starting the next. Reuse the exact prompt for same-prompt variants, or preserve each distinct prompt. Apply the same concurrent-call rule to multiple independent edit_image requests. Use edit_image for explicit WJ edits of ChatGPT attachments. If native ChatGPT image generation explicitly reports quota exhaustion, rate limiting, or temporary unavailability, call WJ once without asking again. If a generated result exists but its image component is missing and a resultId is available, call get_image_result to restore and display it without generating again. Use fallback links when recovery is unavailable, and never regenerate solely because UI display failed. Default to gpt-image-2, 2K, and 1:1 unless specified otherwise. Do not claim success unless the tool returns at least one asset.
 
-For profit calculations, call calculate_profit first and clearly explain that the result has not been saved. Never save merely because the user asked for a calculation. Only call save_profit_calculation after the user explicitly confirms that the displayed calculation should be recorded. Recording requires an existing product SKU: if the user has not supplied one, ask for it and never invent it. Use a user-provided calculation name when available; otherwise generate a concise recognizable record_name from the country, product context, and price before saving.`;
+For profit calculations, call calculate_profit first and clearly explain that the result has not been saved. Never save merely because the user asked for a calculation. Only call save_profit_calculation after the user explicitly confirms that the displayed calculation should be recorded. Recording requires an existing product SKU: if the user has not supplied one, ask for it and never invent it. Use a user-provided calculation name when available; otherwise generate a concise recognizable record_name from the country, product context, and price before saving.
+
+For product drafts: always call list_product_categories first and choose category by matching label/describe from the live list—never invent a category prefix from memory. Decide single product vs product group from the user's variant needs. Present the planned category, isGroup, and variantSerials, then wait for explicit user confirmation before create_product_draft (SKU reservation is irreversible; user_confirmed must be true). Do not publish or finalize products via MCP; the user creates products manually in ERP/Etsy. Quantity uses display form SKU * N; packaging/morph notes use parentheses in communication and the notes field in drafts—never encode *N or (note) into Product.sku.`;
 
 const persistenceOutputSchema = {
   resultId: z.string().optional(),
@@ -50,12 +63,21 @@ type McpServerDependencies = {
   generation: GenerationService;
   imageResults: ImageResultStore;
   profitClient: Pick<WjClient, "calculateProfit" | "saveProfitCalculation">;
+  productDraftClient: Pick<
+    WjClient,
+    | "listProductCategories"
+    | "createProductDraft"
+    | "updateProductDraft"
+    | "getProductDraft"
+    | "listProductDrafts"
+    | "validateProductDraft"
+  >;
   logger: AppLogger;
   widgetHtml: string;
 };
 
 export function createWjMcpServer(dependencies: McpServerDependencies): McpServer {
-  const { config, generation, imageResults, profitClient, logger, widgetHtml } = dependencies;
+  const { config, generation, imageResults, profitClient, productDraftClient, logger, widgetHtml } = dependencies;
   const server = new McpServer(
     { name: "wj-mcp-server", version: APP_VERSION },
     {
@@ -271,6 +293,277 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
         };
       } catch (error) {
         logger.warn({ err: error, tool: "save_profit_calculation" }, "MCP profit recording failed");
+        return { isError: true as const, content: [{ type: "text" as const, text: toSafeToolError(error) }] };
+      }
+    },
+  );
+
+  registerAppTool(
+    server,
+    "list_product_categories",
+    {
+      title: "List WJ product categories",
+      description:
+        "List live product categories (value/label/describe). Always call this before choosing a draft category. Match by label and describe; never invent a category code.",
+      inputSchema: listProductCategoriesInputSchema,
+      outputSchema: {
+        categories: z.array(productCategorySchema),
+      },
+      annotations: {
+        title: "List WJ product categories",
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+      _meta: {
+        securitySchemes: [{ type: "oauth2", scopes: [WJ_IMAGE_SCOPE] }],
+        "openai/toolInvocation/invoking": "WJ is listing product categories",
+        "openai/toolInvocation/invoked": "WJ product categories listed",
+      },
+    },
+    async () => {
+      try {
+        const categories = await productDraftClient.listProductCategories();
+        return {
+          structuredContent: { categories },
+          content: [{
+            type: "text" as const,
+            text: [
+              `Found ${categories.length} product categories. Choose by label/describe, then use value as category.`,
+              ...categories.map((item) => `- ${item.value}: ${item.label}${item.describe ? ` — ${item.describe}` : ""}`),
+            ].join("\n"),
+          }],
+        };
+      } catch (error) {
+        logger.warn({ err: error, tool: "list_product_categories" }, "MCP product category list failed");
+        return { isError: true as const, content: [{ type: "text" as const, text: toSafeToolError(error) }] };
+      }
+    },
+  );
+
+  registerAppTool(
+    server,
+    "create_product_draft",
+    {
+      title: "Create WJ product draft",
+      description:
+        "Create a product draft and immediately reserve a SKU. Requires user_confirmed=true after the user explicitly approves the planned category, single-vs-group choice, and variantSerials. Never invent category codes or main serial numbers. Does not publish; ERP/Etsy finalization is manual.",
+      inputSchema: createProductDraftInputSchema,
+      outputSchema: productDraftSchema.shape,
+      annotations: {
+        title: "Create WJ product draft",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+      _meta: {
+        securitySchemes: [{ type: "oauth2", scopes: [WJ_IMAGE_SCOPE] }],
+        "openai/toolInvocation/invoking": "WJ is creating a product draft",
+        "openai/toolInvocation/invoked": "WJ product draft created",
+      },
+    },
+    async (rawInput) => {
+      try {
+        const input = createProductDraftInputSchema.parse(rawInput);
+        const draft = await productDraftClient.createProductDraft(input);
+        const sku = draft.reservedSku || draft.sku || "";
+        return {
+          structuredContent: draft,
+          content: [{
+            type: "text" as const,
+            text: [
+              `Product draft created. Reserved SKU: ${sku || "(unknown)"}.`,
+              draft.isGroup ? `Group draft. Child SKUs: ${(draft.reservedChildSkus || []).join(", ") || "(none yet)"}.` : "Single-product draft.",
+              "This SKU is reserved for procurement. It is still a draft — do not claim it is published. The user must create the product manually in ERP/Etsy.",
+              "You may update_product_draft to fill images and fields. Use validate_product_draft to check missing fields.",
+            ].join("\n"),
+          }],
+        };
+      } catch (error) {
+        logger.warn({ err: error, tool: "create_product_draft" }, "MCP product draft create failed");
+        return { isError: true as const, content: [{ type: "text" as const, text: toSafeToolError(error) }] };
+      }
+    },
+  );
+
+  registerAppTool(
+    server,
+    "update_product_draft",
+    {
+      title: "Update WJ product draft",
+      description:
+        "Update an existing product draft (images, names, children/variantSerial, prices, notes, etc.). Changing category or isGroup re-reserves SKU and voids the old one — requires user_confirmed=true. When sending children, include the full list; omitted variantSerials are discarded.",
+      inputSchema: updateProductDraftInputSchema,
+      outputSchema: productDraftSchema.shape,
+      annotations: {
+        title: "Update WJ product draft",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+      _meta: {
+        securitySchemes: [{ type: "oauth2", scopes: [WJ_IMAGE_SCOPE] }],
+        "openai/toolInvocation/invoking": "WJ is updating a product draft",
+        "openai/toolInvocation/invoked": "WJ product draft updated",
+      },
+    },
+    async (rawInput) => {
+      try {
+        const input = updateProductDraftInputSchema.parse(rawInput);
+        const draft = await productDraftClient.updateProductDraft(input);
+        const sku = draft.reservedSku || draft.sku || "";
+        return {
+          structuredContent: draft,
+          content: [{
+            type: "text" as const,
+            text: [
+              `Product draft updated. Current reserved SKU: ${sku || "(unknown)"}.`,
+              draft.skuReallocated && draft.previousReservedSku
+                ? `WARNING: SKU reallocated. Old ${draft.previousReservedSku} is voided and not recycled. ${draft.warning || ""}`
+                : "",
+              draft.isGroup && draft.reservedChildSkus?.length
+                ? `Child SKUs: ${draft.reservedChildSkus.join(", ")}`
+                : "",
+            ].filter(Boolean).join("\n"),
+          }],
+        };
+      } catch (error) {
+        logger.warn({ err: error, tool: "update_product_draft" }, "MCP product draft update failed");
+        return { isError: true as const, content: [{ type: "text" as const, text: toSafeToolError(error) }] };
+      }
+    },
+  );
+
+  registerAppTool(
+    server,
+    "get_product_draft",
+    {
+      title: "Get WJ product draft",
+      description: "Fetch one product draft by id.",
+      inputSchema: getProductDraftInputSchema,
+      outputSchema: productDraftSchema.shape,
+      annotations: {
+        title: "Get WJ product draft",
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+      _meta: {
+        securitySchemes: [{ type: "oauth2", scopes: [WJ_IMAGE_SCOPE] }],
+        "openai/toolInvocation/invoking": "WJ is loading a product draft",
+        "openai/toolInvocation/invoked": "WJ product draft loaded",
+      },
+    },
+    async (rawInput) => {
+      try {
+        const input = getProductDraftInputSchema.parse(rawInput);
+        const draft = await productDraftClient.getProductDraft(input);
+        return {
+          structuredContent: draft,
+          content: [{
+            type: "text" as const,
+            text: `Draft ${draft.id}: SKU ${draft.reservedSku || draft.sku || "?"}, category ${draft.category || "?"}, isGroup=${Boolean(draft.isGroup)}.`,
+          }],
+        };
+      } catch (error) {
+        logger.warn({ err: error, tool: "get_product_draft" }, "MCP product draft get failed");
+        return { isError: true as const, content: [{ type: "text" as const, text: toSafeToolError(error) }] };
+      }
+    },
+  );
+
+  registerAppTool(
+    server,
+    "list_product_drafts",
+    {
+      title: "List WJ product drafts",
+      description: "List product drafts with optional category/sku/keyword filters.",
+      inputSchema: listProductDraftsInputSchema,
+      outputSchema: {
+        list: z.array(productDraftSchema),
+        pagination: z.record(z.string(), z.unknown()).optional(),
+      },
+      annotations: {
+        title: "List WJ product drafts",
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+      _meta: {
+        securitySchemes: [{ type: "oauth2", scopes: [WJ_IMAGE_SCOPE] }],
+        "openai/toolInvocation/invoking": "WJ is listing product drafts",
+        "openai/toolInvocation/invoked": "WJ product drafts listed",
+      },
+    },
+    async (rawInput) => {
+      try {
+        const input = listProductDraftsInputSchema.parse(rawInput);
+        const result = await productDraftClient.listProductDrafts(input);
+        return {
+          structuredContent: result,
+          content: [{
+            type: "text" as const,
+            text: [
+              `Found ${result.list.length} draft(s)` + (result.pagination?.total != null ? ` (total ${result.pagination.total}).` : "."),
+              ...result.list.slice(0, 20).map((item) => `- ${item.reservedSku || item.sku || item.id}: ${item.nameCn || item.nameEn || "(unnamed)"}`),
+            ].join("\n"),
+          }],
+        };
+      } catch (error) {
+        logger.warn({ err: error, tool: "list_product_drafts" }, "MCP product draft list failed");
+        return { isError: true as const, content: [{ type: "text" as const, text: toSafeToolError(error) }] };
+      }
+    },
+  );
+
+  registerAppTool(
+    server,
+    "validate_product_draft",
+    {
+      title: "Validate WJ product draft",
+      description:
+        "Check whether a draft has all fields required for eventual ERP product creation. Does not publish. Share missing fields with the user.",
+      inputSchema: validateProductDraftInputSchema,
+      outputSchema: validateProductDraftResultSchema.shape,
+      annotations: {
+        title: "Validate WJ product draft",
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+      _meta: {
+        securitySchemes: [{ type: "oauth2", scopes: [WJ_IMAGE_SCOPE] }],
+        "openai/toolInvocation/invoking": "WJ is validating a product draft",
+        "openai/toolInvocation/invoked": "WJ product draft validated",
+      },
+    },
+    async (rawInput) => {
+      try {
+        const input = validateProductDraftInputSchema.parse(rawInput);
+        const result = await productDraftClient.validateProductDraft(input);
+        const { validation } = result;
+        return {
+          structuredContent: result,
+          content: [{
+            type: "text" as const,
+            text: validation.ok
+              ? "Draft looks complete for ERP creation. Reminder: MCP does not publish; the user must create the product manually in ERP/Etsy."
+              : [
+                "Draft is incomplete for ERP creation.",
+                validation.missing.length ? `Missing: ${validation.missing.join(", ")}` : "",
+                validation.errors.length ? `Errors: ${validation.errors.join("; ")}` : "",
+                validation.warnings.length ? `Warnings: ${validation.warnings.join("; ")}` : "",
+              ].filter(Boolean).join("\n"),
+          }],
+        };
+      } catch (error) {
+        logger.warn({ err: error, tool: "validate_product_draft" }, "MCP product draft validate failed");
         return { isError: true as const, content: [{ type: "text" as const, text: toSafeToolError(error) }] };
       }
     },

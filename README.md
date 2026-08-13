@@ -7,6 +7,9 @@
 - 标准 MCP Streamable HTTP 端点：`POST /mcp`
 - 图片创作能力只有 `generate_image` 和 `edit_image`，另提供只读的 `get_image_result` 结果恢复工具
 - 利润能力包含只读的 `calculate_profit` 和需要用户明确确认的 `save_profit_calculation`
+- 商品草稿：`list_product_categories`、确认后 `create_product_draft`（立即占号）、`update/get/list/validate_product_draft`；**不含 publish**（正式创建由 ERP/Etsy 人工完成）
+- Skill：`skills/wj-product-draft/SKILL.md`（品类以接口为准、创建前确认、SKU 规则）
+- 部署前在 WJ-SREVER 执行 `node scripts/seed_open_platform.js`，确保 MCP 用的 Key 具备 `openApi.productDraft`（对已有利润试算授权的 Key 会自动补授）
 - 试算不要求 SKU；录入必须提供商品池中真实存在的 SKU，并由 WJ 服务端重新计算后保存
 - 录入名称在前端为可选字段；通过 MCP 录入时由 GPT 使用用户名称或自动生成简短名称
 - 每次工具调用只生成或编辑一张图；用户要求多图时，ChatGPT 应同时发起多个独立工具调用
@@ -29,6 +32,7 @@ ChatGPT Work
   -> WJ Open Platform API
      -> image: wj-server / wj-ai-server / LiteLLM -> image component
      -> profit: wj-server calculation / confirmed record upsert
+     -> product draft: /api/v1/products/category/list + /api/v1/products/drafts/*
 ```
 
 `wj-mcp-server` 不直接请求 LiteLLM。它使用 WJ 开放平台接口，因此保留 WJ 已有的 Key、额度、日志和模型路由。

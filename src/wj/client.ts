@@ -10,6 +10,22 @@ import {
   type SaveProfitToolInput,
   toProfitApiInput,
 } from "./profit-types.js";
+import {
+  type CreateProductDraftInput,
+  type GetProductDraftInput,
+  type ListProductDraftsInput,
+  listProductDraftsResultSchema,
+  type ProductCategory,
+  type ProductDraft,
+  productCategorySchema,
+  productDraftSchema,
+  toCreateDraftApiBody,
+  toListDraftsApiBody,
+  toUpdateDraftApiBody,
+  type UpdateProductDraftInput,
+  type ValidateProductDraftInput,
+  validateProductDraftResultSchema,
+} from "./product-draft-types.js";
 import { type GenerateImageInput, type WjImageData, wjImageResponseSchema } from "./types.js";
 import { z } from "zod";
 
@@ -121,8 +137,103 @@ export class WjClient {
     );
   }
 
+  async listProductCategories(): Promise<ProductCategory[]> {
+    const rows = await this.postWjData(
+      "/api/v1/products/category/list",
+      {},
+      z.array(productCategorySchema),
+      "product category list",
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      value: String(row.value || "").trim(),
+      label: String(row.label || "").trim(),
+      describe: String(row.describe || "").trim(),
+    })).filter((row) => row.value);
+  }
+
+  async createProductDraft(input: CreateProductDraftInput): Promise<ProductDraft> {
+    return await this.postWjData(
+      "/api/v1/products/drafts/create",
+      toCreateDraftApiBody(input),
+      productDraftSchema,
+      "product draft create",
+    );
+  }
+
+  async updateProductDraft(input: UpdateProductDraftInput): Promise<ProductDraft> {
+    return await this.postWjData(
+      "/api/v1/products/drafts/update",
+      toUpdateDraftApiBody(input),
+      productDraftSchema,
+      "product draft update",
+    );
+  }
+
+  async getProductDraft(input: GetProductDraftInput): Promise<ProductDraft> {
+    return await this.postWjData(
+      "/api/v1/products/drafts/get",
+      { id: input.id },
+      productDraftSchema,
+      "product draft get",
+    );
+  }
+
+  async listProductDrafts(input: ListProductDraftsInput) {
+    const body = toListDraftsApiBody(input);
+    const endpoint = new URL("/api/v1/products/drafts/list", this.config.wjApiBaseUrl);
+    const json = await this.postWjRaw(endpoint, body, "product draft list");
+    const envelope = z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
+      data: z.array(productDraftSchema).optional(),
+      pagination: z.object({
+        pageNo: z.number().optional(),
+        pageSize: z.number().optional(),
+        total: z.number().optional(),
+      }).passthrough().optional(),
+    }).safeParse(json);
+    if (!envelope.success || !envelope.data.success || !envelope.data.data) {
+      throw new WjApiError(
+        envelope.success ? envelope.data.message ?? "WJ reported product draft list failure" : "WJ returned an invalid product draft list response",
+      );
+    }
+    return listProductDraftsResultSchema.parse({
+      list: envelope.data.data,
+      pagination: envelope.data.pagination,
+    });
+  }
+
+  async validateProductDraft(input: ValidateProductDraftInput) {
+    return await this.postWjData(
+      "/api/v1/products/drafts/validate",
+      { id: input.id },
+      validateProductDraftResultSchema,
+      "product draft validate",
+    );
+  }
+
   private async postWjData<T>(path: string, body: unknown, dataSchema: z.ZodType<T>, operation: string): Promise<T> {
     const endpoint = new URL(path, this.config.wjApiBaseUrl);
+    const json = await this.postWjRaw(endpoint, body, operation);
+    const envelope = z.object({
+      success: z.boolean(),
+      message: z.string().optional(),
+      data: dataSchema.optional(),
+    }).safeParse(json);
+    if (!envelope.success) {
+      throw new WjApiError(`WJ returned an invalid ${operation} response`);
+    }
+    if (!envelope.data.success) {
+      throw new WjApiError(envelope.data.message ?? `WJ reported ${operation} failure`);
+    }
+    if (envelope.data.data === undefined) {
+      throw new WjApiError(`WJ returned an invalid ${operation} response`);
+    }
+    return envelope.data.data;
+  }
+
+  private async postWjRaw(endpoint: URL, body: unknown, operation: string): Promise<unknown> {
     let response: Response;
     try {
       response = await this.fetchImpl(endpoint, {
@@ -152,21 +263,7 @@ export class WjClient {
     if (!response.ok) {
       throw new WjApiError(extractUpstreamMessage(json) ?? `WJ ${operation} failed with HTTP ${response.status}`, response.status);
     }
-    const envelope = z.object({
-      success: z.boolean(),
-      message: z.string().optional(),
-      data: dataSchema.optional(),
-    }).safeParse(json);
-    if (!envelope.success) {
-      throw new WjApiError(`WJ returned an invalid ${operation} response`, response.status);
-    }
-    if (!envelope.data.success) {
-      throw new WjApiError(envelope.data.message ?? `WJ reported ${operation} failure`, response.status);
-    }
-    if (envelope.data.data === undefined) {
-      throw new WjApiError(`WJ returned an invalid ${operation} response`, response.status);
-    }
-    return envelope.data.data;
+    return json;
   }
 }
 
