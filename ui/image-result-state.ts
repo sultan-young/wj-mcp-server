@@ -3,6 +3,7 @@ export type ImageAsset = {
   mime_type?: string;
   width?: number;
   height?: number;
+  duration_ms?: number;
 };
 
 export type ImageResult = {

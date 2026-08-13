@@ -47,6 +47,7 @@ export const imageAssetSchema = z.object({
   width: z.number().int().positive().optional(),
   height: z.number().int().positive().optional(),
   revised_prompt: z.string().optional(),
+  duration_ms: z.number().int().nonnegative().optional(),
 });
 
 export const wjImageDataSchema = z.object({

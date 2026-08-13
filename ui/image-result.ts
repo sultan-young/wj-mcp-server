@@ -347,7 +347,7 @@ function updateChrome(data: ImageResult): void {
     data.aspectRatio,
     total > 1 ? `${activeIndex + 1}/${total}` : undefined,
     asset?.width && asset?.height ? `${asset.width}×${asset.height}` : undefined,
-    formatDuration(data.durationMs),
+    formatDuration(asset?.duration_ms ?? data.durationMs),
   ].filter(Boolean).join(" · ");
   loading.hidden = true;
   errorBox.hidden = true;

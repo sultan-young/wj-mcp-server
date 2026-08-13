@@ -123,11 +123,12 @@ describe("GenerationService", () => {
       maximumActive = Math.max(maximumActive, active);
       await new Promise((resolve) => setTimeout(resolve, 20));
       active -= 1;
+      const durationByPrompt: Record<string, number> = { one: 10, two: 20, three: 30 };
       return {
         model_id: "gpt-image-2",
         resolution: "2K",
         aspect_ratio: "1:1",
-        duration_ms: 10,
+        duration_ms: durationByPrompt[input.prompt] ?? 10,
         assets: [{
           type: "image",
           mime_type: "image/png",
@@ -147,7 +148,8 @@ describe("GenerationService", () => {
     expect(generateImage).toHaveBeenCalledTimes(3);
     expect(maximumActive).toBe(2);
     expect(result.assets).toHaveLength(3);
-    expect(result.duration_ms).toBe(30);
+    expect(result.duration_ms).toBeUndefined();
+    expect(result.assets.map((asset) => asset.duration_ms)).toEqual([10, 20, 30]);
     expect(result.assets.map((asset) => asset.url)).toEqual([
       "https://img.downk.cc/one.png",
       "https://img.downk.cc/two.png",

@@ -61,7 +61,7 @@ export class GenerationService {
     const queue = this.getQueue(terminalId);
     try {
       if (jobs.length === 1) {
-        return await queue(() => this.client.generateImage(jobs[0]!));
+        return stampAssetDurations(await queue(() => this.client.generateImage(jobs[0]!)));
       }
 
       const settled = await Promise.all(
@@ -98,6 +98,7 @@ export class GenerationService {
         ...(asset.width ? { width: asset.width } : {}),
         ...(asset.height ? { height: asset.height } : {}),
         ...(asset.revised_prompt ? { revised_prompt: asset.revised_prompt } : {}),
+        ...(asset.duration_ms === undefined ? {} : { duration_ms: asset.duration_ms }),
       }));
       const imageResult = {
         model: result.model_id,
@@ -147,17 +148,24 @@ export class GenerationService {
 }
 
 function mergeGeneratedImages(results: WjImageData[]): WjImageData {
-  const durationValues = results
-    .map((result) => result.duration_ms)
-    .filter((value): value is number => value !== undefined);
+  const stamped = results.map(stampAssetDurations);
   return {
-    model_id: results[0]?.model_id ?? "unknown",
-    resolution: results[0]?.resolution,
-    aspect_ratio: results[0]?.aspect_ratio,
-    ...(durationValues.length
-      ? { duration_ms: durationValues.reduce((sum, value) => sum + value, 0) }
-      : {}),
-    assets: results.flatMap((result) => result.assets),
+    model_id: stamped[0]?.model_id ?? "unknown",
+    resolution: stamped[0]?.resolution,
+    aspect_ratio: stamped[0]?.aspect_ratio,
+    assets: stamped.flatMap((result) => result.assets),
+  };
+}
+
+/** Copy top-level WJ duration onto each asset so the widget can show the selected image's time. */
+function stampAssetDurations(result: WjImageData): WjImageData {
+  if (result.duration_ms === undefined) return result;
+  return {
+    ...result,
+    assets: result.assets.map((asset) => ({
+      ...asset,
+      duration_ms: asset.duration_ms ?? result.duration_ms,
+    })),
   };
 }
 
