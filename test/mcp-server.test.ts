@@ -3,11 +3,9 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { GenerationService } from "../src/generation-service.js";
-import { ImageResultStore } from "../src/image-result-store.js";
 import { createWjMcpServer, IMAGE_WIDGET_URI, WJ_IMAGE_SERVER_INSTRUCTIONS } from "../src/mcp/server.js";
-import type { RedisClient } from "../src/redis.js";
 import { WjApiError } from "../src/wj/client.js";
-import { testConfig, testGenerationService, testImageResultStore, testLogger, memoryRedis } from "./helpers.js";
+import { testConfig, testGenerationService, testLogger, memoryRedis } from "./helpers.js";
 import { ImageJobStore } from "../src/image-job-store.js";
 
 function emptyProductDraftClient() {
@@ -29,8 +27,8 @@ async function waitForJob(
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const polled = await client.callTool({
-      name: "get_image_job",
-      arguments: { job_id: jobId, wait_ms: 200 },
+      name: "get_image_job_result",
+      arguments: { job_id: jobId },
     });
     const content = polled.structuredContent as Record<string, unknown> | undefined;
     if (content && (content.status === "completed" || content.status === "failed" || content.status === "timed_out")) {
@@ -56,9 +54,8 @@ describe("WJ MCP server", () => {
       assets: [{ type: "image", mime_type: "image/png", url: "https://img.downk.cc/generated.png", width: 1024, height: 1024 }],
     });
     const redis = memoryRedis();
-    const imageResults = new ImageResultStore(redis, 2_592_000);
-    const imageJobs = new ImageJobStore(redis, 1_200);
-    const generation = testGenerationService({ generateImage }, {}, imageResults, imageJobs);
+    const imageJobs = new ImageJobStore(redis, 1_200, 2_592_000);
+    const generation = testGenerationService({ generateImage }, {}, imageJobs);
     const calculateProfit = vi.fn().mockResolvedValue({
       formulaVersion: "1.0.0",
       input: { mode: "sellingProfit", country: "US", payment: "US", regulatory: "NONE" },
@@ -86,7 +83,6 @@ describe("WJ MCP server", () => {
     const server = createWjMcpServer({
       config: testConfig(),
       generation,
-      imageResults,
       profitClient,
       productDraftClient,
       logger: testLogger(),
@@ -103,8 +99,7 @@ describe("WJ MCP server", () => {
 
     const tools = await client.listTools();
     const tool = tools.tools.find((item) => item.name === "generate_image");
-    const jobTool = tools.tools.find((item) => item.name === "get_image_job");
-    const recoveryTool = tools.tools.find((item) => item.name === "get_image_result");
+    const imageLookupTool = tools.tools.find((item) => item.name === "get_image_job_result");
     const calculateProfitTool = tools.tools.find((item) => item.name === "calculate_profit");
     const saveProfitTool = tools.tools.find((item) => item.name === "save_profit_calculation");
     const listCategoriesTool = tools.tools.find((item) => item.name === "list_product_categories");
@@ -112,12 +107,17 @@ describe("WJ MCP server", () => {
     expect(tools.tools.map((item) => item.name)).not.toContain("generate_images");
     expect(tools.tools.map((item) => item.name)).not.toContain("edit_image");
     expect(tools.tools.map((item) => item.name)).not.toContain("publish_product_draft");
+    expect(tools.tools.map((item) => item.name)).not.toContain("get_image");
+    expect(tools.tools.map((item) => item.name)).not.toContain("get_image_job");
+    expect(tools.tools.map((item) => item.name)).not.toContain("get_image_result");
     expect(listCategoriesTool).toBeTruthy();
     expect(createDraftTool?.description).toContain("user_confirmed");
     expect(tool?._meta?.["ui/resourceUri"]).toBe(IMAGE_WIDGET_URI);
     expect(tool?._meta?.["openai/outputTemplate"]).toBe(IMAGE_WIDGET_URI);
-    expect(jobTool?._meta?.ui).toEqual(expect.objectContaining({ visibility: ["app"] }));
-    expect(jobTool?._meta?.["openai/widgetAccessible"]).toBe(true);
+    expect(imageLookupTool?._meta?.ui).toEqual(expect.objectContaining({ visibility: ["app"] }));
+    expect(imageLookupTool?._meta?.["openai/widgetAccessible"]).toBe(true);
+    expect(imageLookupTool?._meta?.["ui/resourceUri"]).toBeUndefined();
+    expect(imageLookupTool?._meta?.["openai/outputTemplate"]).toBeUndefined();
     expect(tool?.inputSchema).toEqual(expect.objectContaining({ type: "object" }));
     expect(tool?.inputSchema.properties).not.toHaveProperty("count");
     expect(tool?._meta?.securitySchemes).toEqual([{ type: "oauth2", scopes: ["wj:tools"] }]);
@@ -144,9 +144,6 @@ describe("WJ MCP server", () => {
         file_id: expect.objectContaining({ type: "string" }),
       }),
     }));
-    expect(recoveryTool?._meta?.["ui/resourceUri"]).toBeUndefined();
-    expect(recoveryTool?._meta?.["openai/outputTemplate"]).toBeUndefined();
-    expect(recoveryTool?._meta?.["openai/widgetAccessible"]).toBe(true);
     expect(calculateProfitTool).toBeTruthy();
     expect(saveProfitTool).toBeTruthy();
 
@@ -187,14 +184,27 @@ describe("WJ MCP server", () => {
       status: expect.stringMatching(/^(queued|running)$/),
       model: "gpt-image-2",
       assets: [],
+      progress: expect.objectContaining({
+        total: 1,
+        succeeded: 0,
+        failed: 0,
+        pending: 1,
+      }),
     }));
     const acceptedJobId = (response.structuredContent as { jobId: string }).jobId;
     const completed = await waitForJob(client, acceptedJobId);
     expect(completed).toEqual(expect.objectContaining({
       status: "completed",
-      resultId: expect.stringMatching(/^wj_img_/),
+      jobId: acceptedJobId,
       assets: [expect.objectContaining({ url: "https://img.downk.cc/generated.png" })],
+      progress: expect.objectContaining({
+        total: 1,
+        succeeded: 1,
+        failed: 0,
+        pending: 0,
+      }),
     }));
+    expect(completed).not.toHaveProperty("resultId");
     expect(generateImage).toHaveBeenCalledWith(expect.objectContaining({
       prompt: "A quiet futuristic city",
       model: "gpt-image-2",
@@ -202,27 +212,18 @@ describe("WJ MCP server", () => {
       resolution: "2K",
     }));
 
-    const generatedResultId = completed.resultId as string;
     const generateCallsBeforeRecovery = generateImage.mock.calls.length;
     const recoveredResponse = await client.callTool({
-      name: "get_image_result",
-      arguments: { result_id: generatedResultId },
+      name: "get_image_job_result",
+      arguments: { job_id: acceptedJobId },
     });
     expect(recoveredResponse.isError).not.toBe(true);
     expect(recoveredResponse.structuredContent).toEqual(expect.objectContaining({
-      resultId: generatedResultId,
+      status: "completed",
+      jobId: acceptedJobId,
       assets: [expect.objectContaining({ url: "https://img.downk.cc/generated.png" })],
     }));
     expect(generateImage).toHaveBeenCalledTimes(generateCallsBeforeRecovery);
-
-    const recoveredByJob = await client.callTool({
-      name: "get_image_result",
-      arguments: { job_id: acceptedJobId },
-    });
-    expect(recoveredByJob.isError).not.toBe(true);
-    expect(recoveredByJob.structuredContent).toEqual(expect.objectContaining({
-      assets: [expect.objectContaining({ url: "https://img.downk.cc/generated.png" })],
-    }));
 
     const res1k = await client.callTool({
       name: "generate_image",
@@ -319,7 +320,6 @@ describe("WJ MCP server", () => {
     const server = createWjMcpServer({
       config: testConfig(),
       generation,
-      imageResults: testImageResultStore(),
       profitClient: { calculateProfit: vi.fn(), saveProfitCalculation: vi.fn() },
       productDraftClient: emptyProductDraftClient(),
       logger: testLogger(),
@@ -342,7 +342,7 @@ describe("WJ MCP server", () => {
   });
 
   it("lists categories and creates a confirmed product draft", async () => {
-    const generation = { submit: vi.fn(), pollJob: vi.fn(), generate: vi.fn() } as unknown as GenerationService;
+    const generation = { submit: vi.fn(), getImage: vi.fn(), generate: vi.fn() } as unknown as GenerationService;
     const listProductCategories = vi.fn().mockResolvedValue([
       { value: "BP", label: "标品", describe: "无定制工厂货" },
       { value: "SK", label: "骷髅", describe: "骷髅系列" },
@@ -365,7 +365,6 @@ describe("WJ MCP server", () => {
     const server = createWjMcpServer({
       config: testConfig(),
       generation,
-      imageResults: testImageResultStore(),
       profitClient: { calculateProfit: vi.fn(), saveProfitCalculation: vi.fn() },
       productDraftClient,
       logger: testLogger(),
@@ -416,24 +415,19 @@ describe("WJ MCP server", () => {
     })]);
   });
 
-  it("completes jobs even when result persistence is temporarily unavailable", async () => {
+  it("keeps completed jobs lookupable by the same job_id", async () => {
     const redis = memoryRedis();
-    const imageJobs = new ImageJobStore(redis, 1_200);
-    const imageResults = new ImageResultStore({
-      set: vi.fn().mockRejectedValue(new Error("Redis unavailable")),
-      get: vi.fn().mockResolvedValue(null),
-    } as unknown as RedisClient, 2_592_000);
+    const imageJobs = new ImageJobStore(redis, 1_200, 2_592_000);
     const generateImage = vi.fn().mockResolvedValue({
       model_id: "gpt-image-2",
       resolution: "2K",
       aspect_ratio: "1:1",
       assets: [{ type: "image", mime_type: "image/png", url: "https://img.downk.cc/fallback.png" }],
     });
-    const generation = testGenerationService({ generateImage }, {}, imageResults, imageJobs);
+    const generation = testGenerationService({ generateImage }, {}, imageJobs);
     const server = createWjMcpServer({
       config: testConfig(),
       generation,
-      imageResults,
       profitClient: { calculateProfit: vi.fn(), saveProfitCalculation: vi.fn() },
       productDraftClient: emptyProductDraftClient(),
       logger: testLogger(),
@@ -456,5 +450,16 @@ describe("WJ MCP server", () => {
     expect(completed.assets).toEqual([
       expect.objectContaining({ url: "https://img.downk.cc/fallback.png" }),
     ]);
+
+    const recovered = await client.callTool({
+      name: "get_image_job_result",
+      arguments: { job_id: jobId },
+    });
+    expect(recovered.isError).not.toBe(true);
+    expect(recovered.structuredContent).toEqual(expect.objectContaining({
+      jobId,
+      status: "completed",
+      assets: [expect.objectContaining({ url: "https://img.downk.cc/fallback.png" })],
+    }));
   });
 });

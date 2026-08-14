@@ -1,7 +1,6 @@
 import { loadConfig, type AppConfig } from "../src/config.js";
 import { GenerationService } from "../src/generation-service.js";
 import { ImageJobStore } from "../src/image-job-store.js";
-import { ImageResultStore } from "../src/image-result-store.js";
 import { createLogger } from "../src/logger.js";
 import type { RedisClient } from "../src/redis.js";
 import type { WjClient } from "../src/wj/client.js";
@@ -43,22 +42,24 @@ export function memoryRedis(): RedisClient {
       return "OK";
     },
     get: async (key: string) => records.get(key) ?? null,
+    del: async (...keys: string[]) => {
+      let removed = 0;
+      for (const key of keys) {
+        if (records.delete(key)) removed += 1;
+      }
+      return removed;
+    },
   } as unknown as RedisClient;
 }
 
-export function testImageResultStore(ttlSeconds = 2_592_000): ImageResultStore {
-  return new ImageResultStore(memoryRedis(), ttlSeconds);
-}
-
-export function testImageJobStore(ttlSeconds = 1_200): ImageJobStore {
-  return new ImageJobStore(memoryRedis(), ttlSeconds);
+export function testImageJobStore(jobTtlSeconds = 1_200, durableTtlSeconds = 2_592_000): ImageJobStore {
+  return new ImageJobStore(memoryRedis(), jobTtlSeconds, durableTtlSeconds);
 }
 
 export function testGenerationService(
   client: Pick<WjClient, "generateImage">,
   overrides: NodeJS.ProcessEnv = {},
-  imageResults = testImageResultStore(),
   imageJobs = testImageJobStore(),
 ): GenerationService {
-  return new GenerationService(client as WjClient, imageJobs, imageResults, testLogger(), testConfig(overrides));
+  return new GenerationService(client as WjClient, imageJobs, testLogger(), testConfig(overrides));
 }

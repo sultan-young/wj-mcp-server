@@ -2,7 +2,6 @@ import pLimit from "p-limit";
 
 import type { AppConfig } from "./config.js";
 import { ImageJobStore, type ImageJobView, type ImagePromptFailure } from "./image-job-store.js";
-import { ImageResultStore } from "./image-result-store.js";
 import type { AppLogger } from "./logger.js";
 import { WjApiError, WjClient } from "./wj/client.js";
 import {
@@ -12,9 +11,6 @@ import {
   type WjImageData,
 } from "./wj/types.js";
 
-const POLL_INTERVAL_MS = 1_500;
-const DEFAULT_POLL_WAIT_MS = 45_000;
-
 export type GenerateBatchResult = {
   result?: WjImageData;
   failures: ImagePromptFailure[];
@@ -23,12 +19,12 @@ export type GenerateBatchResult = {
 export class GenerationService {
   private readonly queues = new Map<string, ReturnType<typeof pLimit>>();
   private readonly maxConcurrency: number;
+
   private readonly inFlight = new Set<string>();
 
   constructor(
     private readonly client: WjClient,
     private readonly jobs: ImageJobStore,
-    private readonly imageResults: ImageResultStore,
     private readonly logger: AppLogger,
     config: AppConfig,
   ) {
@@ -56,18 +52,9 @@ export class GenerationService {
     return record ? this.jobs.toView(record) : undefined;
   }
 
-  /**
-   * Return current job status. When waitMs > 0, long-poll until terminal status or wait budget.
-   */
-  async pollJob(subject: string, jobId: string, waitMs = DEFAULT_POLL_WAIT_MS): Promise<ImageJobView | undefined> {
-    const budget = Math.max(0, Math.min(waitMs, DEFAULT_POLL_WAIT_MS));
-    const deadline = Date.now() + budget;
-    for (;;) {
-      const view = await this.getJob(subject, jobId);
-      if (!view) return undefined;
-      if (isTerminalStatus(view.status) || Date.now() >= deadline) return view;
-      await sleep(Math.min(POLL_INTERVAL_MS, Math.max(0, deadline - Date.now())));
-    }
+  /** Lookup by jobId: current progressive status or durable completed snapshot. */
+  async getImage(subject: string, jobId: string): Promise<ImageJobView | undefined> {
+    return this.getJob(subject, jobId);
   }
 
   /** Expand prompts and run WJ calls concurrently (partial failures allowed). */
@@ -98,7 +85,7 @@ export class GenerationService {
     index: number,
   ): Promise<GenerateBatchResult> {
     try {
-      const data = stampAssetDurations(await queue(() => this.client.generateImage(job)));
+      const data = stampAssetDurations(await queue(() => this.client.generateImage(job)), index);
       this.logger.info({
         promptIndex: index,
         model: data.model_id,
@@ -136,10 +123,34 @@ export class GenerationService {
     }, "image job running");
 
     try {
-      const batch = await this.generate(running.terminalId, running.input);
+      const promptJobs = resolveGenerateJobs(running.input);
+      const queue = this.getQueue(running.terminalId);
+      const settled = await Promise.all(
+        promptJobs.map(async (promptJob, index) => {
+          const outcome = await this.runOne(queue, promptJob, index);
+          if (outcome.result?.assets[0]) {
+            await this.jobs.appendPromptOutcome(jobId, {
+              index,
+              asset: outcome.result.assets[0],
+              model: outcome.result.model_id,
+              resolution: outcome.result.resolution ?? running.resolution,
+              aspectRatio: outcome.result.aspect_ratio ?? running.aspectRatio,
+            });
+          }
+          if (outcome.failures[0]) {
+            await this.jobs.appendPromptOutcome(jobId, {
+              index,
+              failure: outcome.failures[0],
+            });
+          }
+          return outcome;
+        }),
+      );
+
+      const batch = mergeBatchResults(settled);
       const result = batch.result;
       const failures = batch.failures;
-      const assets = (result?.assets ?? []).map((asset) => ({
+      const assets = (result?.assets ?? []).map((asset, index) => ({
         type: asset.type,
         mime_type: asset.mime_type,
         url: asset.url,
@@ -147,6 +158,7 @@ export class GenerationService {
         ...(asset.height ? { height: asset.height } : {}),
         ...(asset.revised_prompt ? { revised_prompt: asset.revised_prompt } : {}),
         ...(asset.duration_ms === undefined ? {} : { duration_ms: asset.duration_ms }),
+        prompt_index: asset.prompt_index ?? index,
       }));
 
       if (assets.length === 0) {
@@ -166,18 +178,6 @@ export class GenerationService {
         assets,
       };
 
-      let resultId: string | undefined;
-      let resultCreatedAt: string | undefined;
-      let resultExpiresAt: string | undefined;
-      try {
-        const persisted = await this.imageResults.save(running.subject, imageResult);
-        resultId = persisted.resultId;
-        resultCreatedAt = persisted.createdAt;
-        resultExpiresAt = persisted.expiresAt;
-      } catch (error) {
-        this.logger.error({ err: error, jobId, tool: "persist_image_result" }, "Failed to persist generated image result");
-      }
-
       const partialError = failures.length
         ? `${failures.length} of ${running.input.prompts.length} image(s) failed. ${summarizeFailures(failures)}`
         : undefined;
@@ -189,14 +189,10 @@ export class GenerationService {
         resolution: imageResult.resolution,
         aspectRatio: imageResult.aspectRatio,
         durationMs: imageResult.durationMs,
-        resultId,
-        resultCreatedAt,
-        resultExpiresAt,
         ...(partialError ? { error: partialError } : {}),
       });
       this.logger.info({
         jobId,
-        resultId,
         successCount: assets.length,
         failureCount: failures.length,
         failures,
@@ -205,6 +201,15 @@ export class GenerationService {
       const message = toJobErrorMessage(error);
       this.logger.warn({ err: error, jobId }, "Background WJ image job failed");
       await this.jobs.fail(jobId, message);
+    } finally {
+      const queue = this.queues.get(running.terminalId);
+      if (queue) {
+        queueMicrotask(() => {
+          if (queue.activeCount === 0 && queue.pendingCount === 0 && this.queues.get(running.terminalId) === queue) {
+            this.queues.delete(running.terminalId);
+          }
+        });
+      }
     }
   }
 
@@ -231,29 +236,24 @@ function mergeBatchResults(batches: GenerateBatchResult[]): GenerateBatchResult 
 }
 
 function mergeGeneratedImages(results: WjImageData[]): WjImageData {
-  const stamped = results.map(stampAssetDurations);
   return {
-    model_id: stamped[0]?.model_id ?? "unknown",
-    resolution: stamped[0]?.resolution,
-    aspect_ratio: stamped[0]?.aspect_ratio,
-    assets: stamped.flatMap((result) => result.assets),
+    model_id: results[0]?.model_id ?? "unknown",
+    resolution: results[0]?.resolution,
+    aspect_ratio: results[0]?.aspect_ratio,
+    assets: results.flatMap((result) => result.assets),
   };
 }
 
-/** Copy top-level WJ duration onto each asset so the widget can show the selected image's time. */
-function stampAssetDurations(result: WjImageData): WjImageData {
-  if (result.duration_ms === undefined) return result;
+/** Copy top-level WJ duration onto each asset; stamp prompt_index for ordering. */
+function stampAssetDurations(result: WjImageData, promptIndex?: number): WjImageData {
   return {
     ...result,
     assets: result.assets.map((asset) => ({
       ...asset,
       duration_ms: asset.duration_ms ?? result.duration_ms,
+      ...(promptIndex === undefined ? {} : { prompt_index: asset.prompt_index ?? promptIndex }),
     })),
   };
-}
-
-function isTerminalStatus(status: ImageJobView["status"]): boolean {
-  return status === "completed" || status === "failed" || status === "timed_out";
 }
 
 function toJobErrorMessage(error: unknown): string {
@@ -271,8 +271,4 @@ function summarizeFailures(failures: ImagePromptFailure[]): string {
     .slice(0, 5)
     .map((failure) => `#${failure.index + 1}: ${failure.error}`)
     .join(" | ");
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

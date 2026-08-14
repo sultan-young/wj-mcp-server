@@ -1,7 +1,25 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { GenerationService } from "../src/generation-service.js";
 import type { GenerateImageInput, WjGenerateImageRequest } from "../src/wj/types.js";
 import { testGenerationService } from "./helpers.js";
+
+async function waitUntilTerminal(
+  service: GenerationService,
+  subject: string,
+  jobId: string,
+  timeoutMs = 5_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const view = await service.getImage(subject, jobId);
+    if (view && (view.status === "completed" || view.status === "failed" || view.status === "timed_out")) {
+      return view;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`Job ${jobId} did not finish in time`);
+}
 
 describe("GenerationService", () => {
   it("runs independent image requests concurrently up to the configured limit", async () => {
@@ -206,7 +224,7 @@ describe("GenerationService", () => {
       aspect_ratio: "1:1",
       resolution: "2K",
     });
-    const completed = await service.pollJob("subject", accepted.jobId, 5_000);
+    const completed = await waitUntilTerminal(service, "subject", accepted.jobId);
     expect(completed?.status).toBe("completed");
     expect(completed?.assets).toEqual([
       expect.objectContaining({ url: "https://img.downk.cc/ok.png" }),
@@ -240,11 +258,11 @@ describe("GenerationService", () => {
     expect(["queued", "running"]).toContain(accepted.status);
     expect(accepted.assets).toEqual([]);
 
-    const completed = await service.pollJob("subject", accepted.jobId, 5_000);
+    const completed = await waitUntilTerminal(service, "subject", accepted.jobId);
     expect(completed?.status).toBe("completed");
     expect(completed?.assets).toEqual([
       expect.objectContaining({ url: "https://img.downk.cc/async.png" }),
     ]);
-    expect(completed?.resultId).toMatch(/^wj_img_/);
+    expect(completed).not.toHaveProperty("resultId");
   });
 });

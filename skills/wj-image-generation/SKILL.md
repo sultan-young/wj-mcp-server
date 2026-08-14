@@ -5,7 +5,7 @@ description: Generate, edit, and display images with the WJ MCP tools. Use when 
 
 # WJ Image Generation
 
-Use `generate_image` for creation and editing. It returns a `jobId` immediately; the WJ image component polls until completion. Use `get_image_result` only to recover when that component failed or is missing—not while it is still loading.
+Use `generate_image` for creation and editing. It returns a `jobId` immediately. After you receive the `jobId`, reply to the user right away—the WJ image component shows results on its own. Use `get_image_job_result` with that same `jobId` only when the component failed or is missing.
 
 ## Route the request
 
@@ -43,12 +43,12 @@ Use `generate_image` for creation and editing. It returns a `jobId` immediately;
 ## Handle results
 
 1. `generate_image` returns a `jobId` immediately (status `queued`/`running`). Treat this as job accepted, not as finished images.
-2. Prefer the WJ image component for display. It polls the job for up to 20 minutes. Never paste markdown image embeds (`![](url)`); that duplicates the component when it is visible.
-3. Do not claim images are ready until the component shows assets or a completed result includes assets.
-4. Identify the result as generated through WJ.
-5. Do not call `get_image_result` while the original `generate_image` component is still loading or already showing images; that mounts duplicate UI.
-6. If the component fails with "Failed to fetch template" or is missing and a `jobId`/`resultId` is available, call `get_image_result` until assets are available, then paste plain-text HTTPS links if needed. Never regenerate solely because the component failed to display.
-7. `get_image_result` accepts `result_id` or `job_id`. It returns data/links for the model and does not mount another image component. Read-only; no WJ image quota.
-8. If recovery is unavailable or the result has expired: paste the plain-text HTTPS original links from the tool result into the assistant reply (URLs only, no markdown image syntax). Do not regenerate automatically.
+2. As soon as you have the `jobId`, reply to the user that WJ has accepted the job and the image component is generating. Do **not** wait for completion yourself, and do **not** call `get_image_job_result` while the component is healthy.
+3. Prefer the WJ image component for display. Never paste markdown image embeds (`![](url)`).
+4. Do not claim images are ready until the component shows assets. You may say generation is in progress / accepted.
+5. Identify the result as generated through WJ.
+6. If the component fails with "Failed to fetch template" or is missing and a `jobId` is available, call `get_image_job_result(job_id)`, then paste plain-text HTTPS links if needed. Never regenerate solely because the component failed to display.
+7. `get_image_job_result` requires `job_id`. Read-only; no WJ image quota. Model use is for recovery only.
+8. If recovery is unavailable: paste plain-text HTTPS original links from the tool result (URLs only, no markdown image syntax). Do not regenerate automatically.
 9. Retry the same request at most once for a transient timeout or `502`-class upstream failure on job submission.
 10. Do not retry authentication, authorization, WJ quota, or WJ rate-limit failures reported on a failed job. Report the actionable error clearly.

@@ -10,9 +10,9 @@
 ChatGPT 附件通过 gpt_reference_images（file params）传入，最多 10 张，并与该次调用的 prompts 每一项共享。
 若规划中不同出图需要不同参考图子集：为每个子集各发起一次 generate_image，并在同一轮工具调用中并发发出，不要等上一张完成再发下一张。
 编辑时保持附件顺序：被改的图放在 gpt_reference_images 首位，其余为参考，并在对应 prompts 条目中说明如何改。
-调用成功后会立刻返回 jobId；由 WJ 图片组件轮询至完成（最长约 20 分钟）。在组件展示出图之前，不要声称图片已生成；也不要在组件仍在加载或已显示时再调用 get_image_result。
+调用成功后会立刻返回 jobId；拿到 jobId 后即可回复用户（说明已受理、组件正在出图），不要由模型自己等待或轮询完成。在组件展示出图之前，不要声称图片已生成；也不要在组件仍在加载或已显示时再调用 get_image_job_result。
 禁止贴 Markdown 图片（![](url)），以免与组件重复出图。
-如果组件加载失败（例如 Failed to fetch template）或完成后未显示：有 jobId 时调用 get_image_result(job_id) 等到 completed；有 resultId 时用 get_image_result(result_id)。不得因此重跑 generate_image。
+如果组件加载失败（例如 Failed to fetch template）或完成后未显示：用 get_image_job_result(job_id) 查询。不得因此重跑 generate_image。
 若仍无组件或用户仍看不到，把工具结果里的原图 HTTPS 链接以纯文本贴进回复（只贴 URL，不要 Markdown 图片语法）。
 当 ChatGPT 原生生图明确返回额度不足或限流错误，且 generate_image 可用时，尝试用 WJ 重新生成一次。
 不得声称图片由 ChatGPT 原生生图生成；应明确标记为 WJ 生成。

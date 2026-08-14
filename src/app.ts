@@ -14,7 +14,6 @@ import { createAuthServices, WJ_LEGACY_SCOPE, WJ_MCP_SCOPE } from "./auth/provid
 import type { AppConfig } from "./config.js";
 import { GenerationService } from "./generation-service.js";
 import { ImageJobStore } from "./image-job-store.js";
-import { ImageResultStore } from "./image-result-store.js";
 import { UsageLimitError, UsageLimits } from "./limits.js";
 import type { AppLogger } from "./logger.js";
 import { createWjMcpServer } from "./mcp/server.js";
@@ -37,9 +36,12 @@ export async function createApplication(dependencies: AppDependencies) {
   const widgetHtml = dependencies.widgetHtml ?? await readFile(resolve(process.cwd(), "dist/ui/image-result.html"), "utf8");
   const limits = new UsageLimits(redis, config);
   const wjClient = new WjClient(config, logger, dependencies.fetchImpl);
-  const imageResults = new ImageResultStore(redis, config.IMAGE_RESULT_TTL_SECONDS);
-  const imageJobs = new ImageJobStore(redis, config.IMAGE_JOB_TTL_SECONDS);
-  const generation = new GenerationService(wjClient, imageJobs, imageResults, logger, config);
+  const imageJobs = new ImageJobStore(
+    redis,
+    config.IMAGE_JOB_TTL_SECONDS,
+    config.IMAGE_RESULT_TTL_SECONDS,
+  );
+  const generation = new GenerationService(wjClient, imageJobs, logger, config);
   const auth = createAuthServices(config, redis, limits, logger);
   const app = createMcpExpressApp({ host: config.HOST, allowedHosts: config.ALLOWED_HOSTS });
 
@@ -103,7 +105,6 @@ export async function createApplication(dependencies: AppDependencies) {
     const mcpServer = createWjMcpServer({
       config,
       generation,
-      imageResults,
       profitClient: wjClient,
       productDraftClient: wjClient,
       logger,

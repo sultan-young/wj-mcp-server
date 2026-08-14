@@ -64,6 +64,10 @@ main {
   height: 100%;
   object-fit: contain;
   object-position: center;
+  /* Native drag into ChatGPT often freezes the iframe; we are not a drag source. */
+  -webkit-user-drag: none;
+  user-select: none;
+  pointer-events: auto;
 }
 
 .thumbs {
@@ -96,6 +100,8 @@ main {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  -webkit-user-drag: none;
+  user-select: none;
 }
 
 .thumb.is-active {

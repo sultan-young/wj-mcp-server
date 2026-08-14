@@ -14,6 +14,13 @@ export const imagePromptFailureSchema = z.object({
   error: z.string().min(1),
 });
 
+export const imageJobProgressSchema = z.object({
+  total: z.number().int().nonnegative(),
+  succeeded: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+  pending: z.number().int().nonnegative(),
+});
+
 export const imageJobRecordSchema = z.object({
   jobId: z.string().min(1),
   subject: z.string().min(1),
@@ -22,6 +29,7 @@ export const imageJobRecordSchema = z.object({
   model: z.string(),
   resolution: z.string(),
   aspectRatio: z.string(),
+  promptTotal: z.number().int().positive(),
   input: generateImageInputSchema,
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -30,14 +38,12 @@ export const imageJobRecordSchema = z.object({
   durationMs: z.number().int().nonnegative().optional(),
   assets: z.array(imageAssetSchema).default([]),
   failures: z.array(imagePromptFailureSchema).default([]),
-  resultId: z.string().optional(),
-  resultCreatedAt: z.string().datetime().optional(),
-  resultExpiresAt: z.string().datetime().optional(),
 });
 
 export type ImageJobRecord = z.infer<typeof imageJobRecordSchema>;
 export type ImageJobStatus = z.infer<typeof imageJobStatusSchema>;
 export type ImagePromptFailure = z.infer<typeof imagePromptFailureSchema>;
+export type ImageJobProgress = z.infer<typeof imageJobProgressSchema>;
 
 /** Public job snapshot returned to MCP clients / widget (no raw input). */
 export type ImageJobView = {
@@ -53,15 +59,18 @@ export type ImageJobView = {
   durationMs?: number;
   assets: z.infer<typeof imageAssetSchema>[];
   failures: ImagePromptFailure[];
-  resultId?: string;
-  resultCreatedAt?: string;
-  resultExpiresAt?: string;
+  progress: ImageJobProgress;
 };
 
 export class ImageJobStore {
+  private readonly writeChains = new Map<string, Promise<unknown>>();
+
   constructor(
     private readonly redis: RedisClient,
-    private readonly ttlSeconds: number,
+    /** Working-window TTL while queued/running (default ~20 minutes). */
+    private readonly jobTtlSeconds: number,
+    /** Retention TTL after completion (default ~30 days). */
+    private readonly durableTtlSeconds: number,
   ) {}
 
   async create(params: {
@@ -79,14 +88,15 @@ export class ImageJobStore {
       model: params.input.model,
       resolution: params.input.resolution,
       aspectRatio: params.input.aspect_ratio,
+      promptTotal: params.input.prompts.length,
       input: params.input,
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
-      expiresAt: new Date(now.getTime() + this.ttlSeconds * 1000).toISOString(),
+      expiresAt: new Date(now.getTime() + this.jobTtlSeconds * 1000).toISOString(),
       assets: [],
       failures: [],
     });
-    await this.write(record);
+    await this.write(record, this.jobTtlSeconds);
     return record;
   }
 
@@ -97,18 +107,75 @@ export class ImageJobStore {
   }
 
   async markRunning(jobId: string): Promise<ImageJobRecord | undefined> {
-    const record = await this.read(jobId);
-    if (!record) return undefined;
-    if (record.status !== "queued" && record.status !== "running") return record;
-    const expired = await this.expireIfNeeded(record);
-    if (expired.status === "timed_out") return expired;
-    const next = imageJobRecordSchema.parse({
-      ...expired,
-      status: "running",
-      updatedAt: new Date().toISOString(),
+    return this.enqueueWrite(jobId, async () => {
+      const record = await this.read(jobId);
+      if (!record) return undefined;
+      if (record.status !== "queued" && record.status !== "running") return record;
+      const current = await this.expireIfNeeded(record);
+      if (!current || current.status === "timed_out") return current;
+      const next = imageJobRecordSchema.parse({
+        ...current,
+        status: "running",
+        updatedAt: new Date().toISOString(),
+      });
+      await this.write(next, this.remainingTtlSeconds(next.expiresAt, this.jobTtlSeconds));
+      return next;
     });
-    await this.write(next);
-    return next;
+  }
+
+  /** Record one prompt outcome while the job is still running (progressive display). */
+  async appendPromptOutcome(
+    jobId: string,
+    outcome: {
+      index: number;
+      asset?: ImageJobRecord["assets"][number];
+      failure?: ImagePromptFailure;
+      model?: string;
+      resolution?: string;
+      aspectRatio?: string;
+    },
+  ): Promise<ImageJobRecord | undefined> {
+    return this.enqueueWrite(jobId, async () => {
+      const record = await this.read(jobId);
+      if (!record) return undefined;
+      if (record.status === "timed_out" || record.status === "failed" || record.status === "completed") {
+        return record;
+      }
+
+      const assets = [...record.assets];
+      const failures = [...record.failures];
+
+      if (outcome.asset) {
+        const withIndex = {
+          ...outcome.asset,
+          prompt_index: outcome.asset.prompt_index ?? outcome.index,
+        };
+        const existing = assets.findIndex((asset) => asset.prompt_index === withIndex.prompt_index);
+        if (existing >= 0) assets[existing] = withIndex;
+        else assets.push(withIndex);
+        assets.sort((a, b) => (a.prompt_index ?? 0) - (b.prompt_index ?? 0));
+      }
+
+      if (outcome.failure) {
+        const existing = failures.findIndex((item) => item.index === outcome.failure!.index);
+        if (existing >= 0) failures[existing] = outcome.failure;
+        else failures.push(outcome.failure);
+        failures.sort((a, b) => a.index - b.index);
+      }
+
+      const next = imageJobRecordSchema.parse({
+        ...record,
+        status: "running",
+        model: outcome.model ?? record.model,
+        resolution: outcome.resolution ?? record.resolution,
+        aspectRatio: outcome.aspectRatio ?? record.aspectRatio,
+        assets,
+        failures,
+        updatedAt: new Date().toISOString(),
+      });
+      await this.write(next, this.remainingTtlSeconds(next.expiresAt, this.jobTtlSeconds));
+      return next;
+    });
   }
 
   async complete(
@@ -120,46 +187,49 @@ export class ImageJobStore {
       resolution: string;
       aspectRatio: string;
       durationMs?: number;
-      resultId?: string;
-      resultCreatedAt?: string;
-      resultExpiresAt?: string;
       error?: string;
     },
   ): Promise<ImageJobRecord | undefined> {
-    const record = await this.read(jobId);
-    if (!record) return undefined;
-    if (record.status === "timed_out" || record.status === "failed") return record;
-    const next = imageJobRecordSchema.parse({
-      ...record,
-      status: "completed",
-      model: payload.model,
-      resolution: payload.resolution,
-      aspectRatio: payload.aspectRatio,
-      durationMs: payload.durationMs,
-      assets: payload.assets,
-      failures: payload.failures ?? [],
-      resultId: payload.resultId,
-      resultCreatedAt: payload.resultCreatedAt,
-      resultExpiresAt: payload.resultExpiresAt,
-      updatedAt: new Date().toISOString(),
-      ...(payload.error ? { error: payload.error } : { error: undefined }),
+    return this.enqueueWrite(jobId, async () => {
+      const record = await this.read(jobId);
+      if (!record) return undefined;
+      if (record.status === "timed_out" || record.status === "failed") return record;
+      const now = new Date();
+      const assets = [...payload.assets].sort(
+        (a, b) => (a.prompt_index ?? 0) - (b.prompt_index ?? 0),
+      );
+      const next = imageJobRecordSchema.parse({
+        ...record,
+        status: "completed",
+        model: payload.model,
+        resolution: payload.resolution,
+        aspectRatio: payload.aspectRatio,
+        durationMs: payload.durationMs,
+        assets,
+        failures: payload.failures ?? [],
+        updatedAt: now.toISOString(),
+        expiresAt: new Date(now.getTime() + this.durableTtlSeconds * 1000).toISOString(),
+        ...(payload.error ? { error: payload.error } : { error: undefined }),
+      });
+      await this.write(next, this.durableTtlSeconds);
+      return next;
     });
-    await this.write(next);
-    return next;
   }
 
   async fail(jobId: string, error: string): Promise<ImageJobRecord | undefined> {
-    const record = await this.read(jobId);
-    if (!record) return undefined;
-    if (record.status === "completed" || record.status === "timed_out") return record;
-    const next = imageJobRecordSchema.parse({
-      ...record,
-      status: "failed",
-      error,
-      updatedAt: new Date().toISOString(),
+    return this.enqueueWrite(jobId, async () => {
+      const record = await this.read(jobId);
+      if (!record) return undefined;
+      if (record.status === "completed" || record.status === "timed_out") return record;
+      const next = imageJobRecordSchema.parse({
+        ...record,
+        status: "failed",
+        error,
+        updatedAt: new Date().toISOString(),
+      });
+      await this.write(next, this.remainingTtlSeconds(next.expiresAt, this.jobTtlSeconds));
+      return next;
     });
-    await this.write(next);
-    return next;
   }
 
   toView(record: ImageJobRecord): ImageJobView {
@@ -174,25 +244,51 @@ export class ImageJobStore {
       expiresAt: record.expiresAt,
       assets: record.assets,
       failures: record.failures ?? [],
+      progress: computeProgress(record),
       ...(record.error ? { error: record.error } : {}),
       ...(record.durationMs === undefined ? {} : { durationMs: record.durationMs }),
-      ...(record.resultId ? { resultId: record.resultId } : {}),
-      ...(record.resultCreatedAt ? { resultCreatedAt: record.resultCreatedAt } : {}),
-      ...(record.resultExpiresAt ? { resultExpiresAt: record.resultExpiresAt } : {}),
     };
   }
 
-  private async expireIfNeeded(record: ImageJobRecord): Promise<ImageJobRecord> {
-    if (record.status !== "queued" && record.status !== "running") return record;
+  /** Fingerprint of status/progress/assets for change detection. */
+  viewFingerprint(view: ImageJobView): string {
+    return [
+      view.status,
+      view.progress.succeeded,
+      view.progress.failed,
+      view.progress.pending,
+      view.assets.map((asset) => asset.url).join("|"),
+      view.error ?? "",
+    ].join(":");
+  }
+
+  /** Serialize Redis read-modify-write mutations for one job. */
+  private enqueueWrite<T>(jobId: string, op: () => Promise<T>): Promise<T> {
+    const previous = this.writeChains.get(jobId) ?? Promise.resolve();
+    const run = previous.catch(() => undefined).then(op);
+    this.writeChains.set(
+      jobId,
+      run.then(() => undefined, () => undefined),
+    );
+    return run;
+  }
+
+  private async expireIfNeeded(record: ImageJobRecord): Promise<ImageJobRecord | undefined> {
     if (Date.parse(record.expiresAt) > Date.now()) return record;
-    const next = imageJobRecordSchema.parse({
-      ...record,
-      status: "timed_out",
-      error: "Image job timed out after 20 minutes.",
-      updatedAt: new Date().toISOString(),
-    });
-    await this.write(next);
-    return next;
+
+    if (record.status === "queued" || record.status === "running") {
+      const next = imageJobRecordSchema.parse({
+        ...record,
+        status: "timed_out",
+        error: "Image job timed out after 20 minutes.",
+        updatedAt: new Date().toISOString(),
+      });
+      await this.write(next, 60);
+      return next;
+    }
+
+    await this.redis.del(`${JOB_KEY_PREFIX}${record.jobId}`);
+    return undefined;
   }
 
   private async read(jobId: string): Promise<ImageJobRecord | undefined> {
@@ -208,10 +304,28 @@ export class ImageJobStore {
     return parsed.success ? parsed.data : undefined;
   }
 
-  private async write(record: ImageJobRecord): Promise<void> {
-    const remainingSeconds = Math.max(1, Math.ceil((Date.parse(record.expiresAt) - Date.now()) / 1000));
-    // Keep completed/failed records until the original job window ends (or a short grace after).
-    const ttl = Math.max(remainingSeconds, 60);
+  private async write(record: ImageJobRecord, ttlSeconds: number): Promise<void> {
+    const ttl = Math.max(1, Math.floor(ttlSeconds));
     await this.redis.set(`${JOB_KEY_PREFIX}${record.jobId}`, JSON.stringify(record), { EX: ttl });
   }
+
+  private remainingTtlSeconds(expiresAt: string, fallback: number): number {
+    const remaining = Math.ceil((Date.parse(expiresAt) - Date.now()) / 1000);
+    return Math.max(1, Number.isFinite(remaining) ? remaining : fallback);
+  }
+}
+
+export function computeProgress(record: Pick<ImageJobRecord, "promptTotal" | "assets" | "failures" | "status">): ImageJobProgress {
+  const succeeded = record.assets.length;
+  const failed = record.failures.length;
+  const settled = succeeded + failed;
+  const pending = record.status === "completed" || record.status === "failed" || record.status === "timed_out"
+    ? 0
+    : Math.max(0, record.promptTotal - settled);
+  return {
+    total: record.promptTotal,
+    succeeded,
+    failed,
+    pending,
+  };
 }
