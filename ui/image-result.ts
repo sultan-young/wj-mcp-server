@@ -17,7 +17,6 @@ import {
   getImageResult,
   getImageResultKey,
   imageJobMatchesBinding,
-  isTerminalImageJobStatus,
   isTerminalImageJobToolFailure,
   type ImageAsset,
   type ImageJob,
@@ -51,7 +50,8 @@ const mainSkeleton = requiredElement<HTMLDivElement>("main-skeleton");
 const mainFailed = requiredElement<HTMLDivElement>("main-failed");
 const thumbs = requiredElement<HTMLElement>("thumbs");
 const model = requiredElement<HTMLElement>("model");
-const details = requiredElement<HTMLSpanElement>("details");
+const resolution = requiredElement<HTMLSpanElement>("resolution");
+const stats = requiredElement<HTMLSpanElement>("stats");
 const openButton = requiredElement<HTMLButtonElement>("open");
 
 let current: ImageResult | undefined;
@@ -64,7 +64,6 @@ let persistedInProgressJobId: string | undefined;
 let pollInFlight: Promise<void> | undefined;
 let compatibilityRestoreTimer: number | undefined;
 let activeJobId: string | undefined;
-let progressNote: string | undefined;
 
 createIcons({ icons: { ExternalLink } });
 
@@ -172,14 +171,12 @@ async function applyJobSnapshot(job: ImageJob, persist: boolean): Promise<"conti
   if (next.kind === "render") {
     if (bindImageResult(next.imageResult)) renderCompletedGallery(next.imageResult, persist);
     activeJobId = undefined;
-    progressNote = undefined;
     return "done";
   }
   if (next.kind === "lost") {
     if (!slots.some((slot) => slot.status === "ready")) {
       showLost(next.reason, persist, job.jobId);
     } else {
-      progressNote = undefined;
       showIndex(activeIndex);
     }
     activeJobId = undefined;
@@ -193,7 +190,7 @@ async function probeStatusThenFollow(jobId: string, persist: boolean): Promise<v
   if (!stillBoundToJob(jobId)) return;
   boundResultKey ??= getImageJobIdKey(jobId);
   activeJobId = jobId;
-  showPendingGallery(jobId, "running");
+  showPendingGallery(jobId);
   if (persist) persistInProgress(jobId);
 
   try {
@@ -280,7 +277,6 @@ async function pollStatusUntilDone(jobId: string, persist: boolean): Promise<voi
 
 async function recoverAfterMissingJob(persist: boolean, fallbackMessage: string): Promise<void> {
   if (slots.some((slot) => slot.status === "ready")) {
-    progressNote = undefined;
     showIndex(activeIndex);
     return;
   }
@@ -292,8 +288,7 @@ async function recoverAfterMissingJob(persist: boolean, fallbackMessage: string)
   showLost(fallbackMessage, persist, activeJobId);
 }
 
-function showPendingGallery(jobId: string, status: string): void {
-  progressNote = `生成中（${status}）`;
+function showPendingGallery(jobId: string): void {
   const total = Math.max(slots.length, 1);
   slots = Array.from({ length: total }, () => ({ status: "pending" as const }));
   current = {
@@ -312,14 +307,6 @@ function renderJobGallery(job: ImageJob): void {
     (job.failures?.reduce((max, item) => Math.max(max, item.index + 1), 0) ?? 0),
   );
   const nextSlots = buildSlotsFromJob(job, total);
-  const progress = job.progress;
-  progressNote = isTerminalImageJobStatus(job.status)
-    ? undefined
-    : progress
-      ? `生成中 ${progress.succeeded}/${progress.total} 成功`
-        + (progress.failed ? ` · ${progress.failed} 失败` : "")
-        + (progress.pending ? ` · ${progress.pending} 待完成` : "")
-      : `生成中（${job.status}）`;
 
   const readyAssets = nextSlots
     .filter((slot): slot is { status: "ready"; asset: ImageAsset } => slot.status === "ready")
@@ -341,7 +328,6 @@ function renderJobGallery(job: ImageJob): void {
 }
 
 function renderCompletedGallery(data: ImageResult, persistCompletedSnapshot: boolean): void {
-  progressNote = undefined;
   activeJobId = undefined;
   current = data;
   slots = data.assets.map((asset) => ({ status: "ready" as const, asset }));
@@ -461,21 +447,19 @@ function showIndex(nextIndex: number): void {
 
 function updateChrome(): void {
   const slot = slots[activeIndex];
-  const readyCount = slots.filter((item) => item.status === "ready").length;
   model.textContent = current?.model ?? "WJ";
-  details.textContent = [
-    current?.resolution,
-    current?.aspectRatio,
-    slots.length > 1 ? `${activeIndex + 1}/${slots.length}` : undefined,
-    slot?.status === "ready" && slot.asset.width && slot.asset.height
-      ? `${slot.asset.width}×${slot.asset.height}`
-      : undefined,
-    slot?.status === "ready"
-      ? formatDuration(slot.asset.duration_ms ?? current?.durationMs)
-      : undefined,
-    readyCount > 0 && readyCount < slots.length ? `已出 ${readyCount}` : undefined,
-    current?.failureCount ? `失败 ${current.failureCount}` : undefined,
-    progressNote,
+
+  // Pixel size from the generated asset (API width/height), not request-time 2K / 1:1.
+  resolution.textContent = slot?.status === "ready" && slot.asset.width && slot.asset.height
+    ? `${slot.asset.width} * ${slot.asset.height}`
+    : "";
+
+  const duration = formatDuration(
+    (slot?.status === "ready" ? slot.asset.duration_ms : undefined) ?? current?.durationMs,
+  );
+  stats.textContent = [
+    slots.length > 0 ? `${activeIndex + 1}/${slots.length}` : undefined,
+    duration,
   ].filter(Boolean).join(" · ");
 
   openButton.disabled = slot?.status !== "ready";

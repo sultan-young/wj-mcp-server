@@ -136,29 +136,35 @@ main {
   justify-content: space-between;
   gap: 12px;
   padding: 0 2px;
-}
-
-.meta {
-  min-width: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px 10px;
   font-size: 13px;
 }
 
-.meta strong {
+.meta-left,
+.meta-right {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.meta-left {
+  flex: 1 1 auto;
+}
+
+.meta-right {
+  flex: 0 0 auto;
+  margin-left: auto;
+  justify-content: flex-end;
+}
+
+.meta-left strong {
   overflow-wrap: anywhere;
 }
 
-.meta span {
+.meta-left span,
+.meta-right span {
   color: var(--color-text-secondary, #66736d);
-}
-
-.actions {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 4px;
 }
 
 #open {
