@@ -64,10 +64,6 @@ main {
   height: 100%;
   object-fit: contain;
   object-position: center;
-  /* Native drag into ChatGPT often freezes the iframe; we are not a drag source. */
-  -webkit-user-drag: none;
-  user-select: none;
-  pointer-events: auto;
 }
 
 .thumbs {
@@ -100,12 +96,32 @@ main {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  -webkit-user-drag: none;
-  user-select: none;
 }
 
 .thumb.is-active {
   border-color: var(--color-ring-primary, #16845d);
+}
+
+.thumb.is-pending,
+.thumb.is-failed {
+  cursor: pointer;
+}
+
+.thumb .thumb-skeleton {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.thumb.is-failed {
+  display: grid;
+  place-items: center;
+  color: var(--color-text-secondary, #66736d);
+  font-size: 11px;
+  border-color: var(--color-border-primary, #d6ddd9);
 }
 
 .thumb:focus-visible {
@@ -157,8 +173,13 @@ main {
   cursor: pointer;
 }
 
-#open:hover {
+#open:hover:not(:disabled) {
   background: var(--color-background-secondary, #eef2ef);
+}
+
+#open:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 #open:focus-visible {
@@ -172,19 +193,21 @@ main {
   stroke-width: 1.8;
 }
 
-.loading,
 .error {
-  min-height: 440px;
+  min-height: 96px;
   display: grid;
   place-items: center;
-  gap: 12px;
+  text-align: center;
+  border: 1px solid var(--color-border-primary, #d6ddd9);
+  border-radius: 6px;
+  padding: 18px;
   color: var(--color-text-secondary, #66736d);
   font-size: 13px;
 }
 
 .skeleton {
   width: 100%;
-  height: min(75vh, 680px);
+  height: 100%;
   min-height: 440px;
   border-radius: 14px;
   background: linear-gradient(100deg, #edf1ef 20%, #f7f9f8 45%, #edf1ef 70%);
@@ -192,17 +215,21 @@ main {
   animation: loading 1.5s linear infinite;
 }
 
+.main-stage .skeleton {
+  height: 100%;
+  min-height: 0;
+}
+
+.stage-failed {
+  padding: 18px;
+  text-align: center;
+  color: var(--color-text-secondary, #66736d);
+  font-size: 13px;
+}
+
 :root[data-theme="dark"] .skeleton {
   background: linear-gradient(100deg, #202923 20%, #2b352f 45%, #202923 70%);
   background-size: 220% 100%;
-}
-
-.error {
-  min-height: 96px;
-  text-align: center;
-  border: 1px solid var(--color-border-primary, #d6ddd9);
-  border-radius: 6px;
-  padding: 18px;
 }
 
 @keyframes loading {
@@ -216,9 +243,12 @@ main {
     grid-template-columns: 1fr;
   }
 
-  .main-stage,
-  .skeleton {
+  .main-stage {
     height: min(70vh, 560px);
+    min-height: 360px;
+  }
+
+  .skeleton {
     min-height: 360px;
   }
 

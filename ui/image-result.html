@@ -7,16 +7,14 @@
   </head>
   <body>
     <main id="app" aria-live="polite">
-      <div id="loading" class="loading">
-        <div class="skeleton"></div>
-        <span id="loading-text">WJ 正在准备图片</span>
-      </div>
       <div id="error" class="error" hidden>图片结果暂时无法显示，请使用消息中的原图链接。</div>
       <section id="result" hidden>
         <div class="layout">
           <div class="main-col">
             <div class="main-stage" aria-label="当前图片">
-              <img id="main-image" alt="WJ 生成图片" decoding="async" referrerpolicy="no-referrer" draggable="false" />
+              <img id="main-image" alt="WJ 生成图片" decoding="async" referrerpolicy="no-referrer" hidden />
+              <div id="main-skeleton" class="skeleton" hidden></div>
+              <div id="main-failed" class="stage-failed" hidden></div>
             </div>
             <div class="meta-row">
               <div class="meta">

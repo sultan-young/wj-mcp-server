@@ -19,7 +19,7 @@ import {
   imageJobMatchesBinding,
   isTerminalImageJobStatus,
   isTerminalImageJobToolFailure,
-  jobToImageResult,
+  type ImageAsset,
   type ImageJob,
   type ImageResult,
 } from "./image-result-state.js";
@@ -32,6 +32,11 @@ type OpenAiBridge = {
   setWidgetState?: (state: unknown) => void;
 };
 
+type GallerySlot =
+  | { status: "ready"; asset: ImageAsset }
+  | { status: "pending" }
+  | { status: "failed"; error?: string };
+
 declare global {
   interface Window {
     openai?: OpenAiBridge;
@@ -39,33 +44,29 @@ declare global {
 }
 
 const app = new App({ name: "WJ image result", version: APP_VERSION }, {});
-const loading = requiredElement<HTMLDivElement>("loading");
-const loadingText = requiredElement<HTMLSpanElement>("loading-text");
 const errorBox = requiredElement<HTMLDivElement>("error");
 const result = requiredElement<HTMLElement>("result");
 const mainImage = requiredElement<HTMLImageElement>("main-image");
+const mainSkeleton = requiredElement<HTMLDivElement>("main-skeleton");
+const mainFailed = requiredElement<HTMLDivElement>("main-failed");
 const thumbs = requiredElement<HTMLElement>("thumbs");
 const model = requiredElement<HTMLElement>("model");
 const details = requiredElement<HTMLSpanElement>("details");
 const openButton = requiredElement<HTMLButtonElement>("open");
 
 let current: ImageResult | undefined;
+let slots: GallerySlot[] = [];
 let activeIndex = 0;
 let boundResultKey: string | undefined;
-let renderedResultKey: string | undefined;
+let renderedSlotKey: string | undefined;
 let persistedCompletedKey: string | undefined;
 let persistedInProgressJobId: string | undefined;
 let pollInFlight: Promise<void> | undefined;
 let compatibilityRestoreTimer: number | undefined;
 let activeJobId: string | undefined;
+let progressNote: string | undefined;
 
 createIcons({ icons: { ExternalLink } });
-
-mainImage.draggable = false;
-mainImage.addEventListener("dragstart", (event) => event.preventDefault());
-thumbs.addEventListener("dragstart", (event) => {
-  if (event.target instanceof HTMLImageElement) event.preventDefault();
-});
 
 app.addEventListener("toolresult", (params) => {
   cancelCompatibilityRestore();
@@ -75,13 +76,13 @@ app.addEventListener("toolresult", (params) => {
 app.onhostcontextchanged = applyHostContext;
 
 window.addEventListener("keydown", (event) => {
-  if (!current || current.assets.length < 2) return;
+  if (slots.length < 2) return;
   if (event.key === "ArrowLeft") showIndex(activeIndex - 1);
   if (event.key === "ArrowRight") showIndex(activeIndex + 1);
 });
 
 openButton.addEventListener("click", async () => {
-  const url = currentAsset()?.url;
+  const url = currentReadyAsset()?.url;
   if (url) await app.openLink({ url });
 });
 
@@ -91,7 +92,7 @@ void hydrateFromSource(window.openai?.widgetState, false);
 
 window.addEventListener("openai:set_globals", (event) => {
   const globals = (event as CustomEvent<{ globals?: OpenAiBridge }>).detail?.globals;
-  if (current) return;
+  if (current || slots.length > 0) return;
   void hydrateFromSource((globals ?? window.openai)?.widgetState, false);
 });
 
@@ -106,21 +107,23 @@ async function applyToolResult(params: unknown, persist: boolean): Promise<void>
   const imageResult = getImageResult(params);
   if (imageResult) {
     if (!bindImageResult(imageResult)) return;
-    renderAssets(imageResult, persist);
+    renderCompletedGallery(imageResult, persist);
     return;
   }
 
   if (record.isError) {
-    if (!current) showLost("图片结果暂时无法显示，请使用消息中的原图链接。");
+    if (!current && slots.every((slot) => slot.status !== "ready")) {
+      showLost("图片结果暂时无法显示，请使用消息中的原图链接。");
+    }
     return;
   }
 
-  if (current) return;
+  if (current || slots.length > 0) return;
   await executeRestorePlan(resolveRestorePlan(params), persist);
 }
 
 async function hydrateFromSource(source: unknown, persist: boolean): Promise<void> {
-  if (current || source === undefined) return;
+  if (current || slots.length > 0 || source === undefined) return;
   const plan = resolveRestorePlan(source);
   if (plan.kind === "none") {
     scheduleCompatibilityRestore();
@@ -133,7 +136,7 @@ async function executeRestorePlan(plan: RestorePlan, persist: boolean): Promise<
   switch (plan.kind) {
     case "render":
       if (!bindImageResult(plan.imageResult)) return;
-      renderAssets(plan.imageResult, persist);
+      renderCompletedGallery(plan.imageResult, persist);
       return;
     case "probe_status":
       await probeStatusThenFollow(plan.jobId, persist);
@@ -146,7 +149,6 @@ async function executeRestorePlan(plan: RestorePlan, persist: boolean): Promise<
   }
 }
 
-/** Live path after generate_image / status snapshot. */
 async function followStatusJob(job: ImageJob, persist: boolean, allowPoll: boolean): Promise<void> {
   if (!stillBoundToJob(job.jobId)) return;
   boundResultKey ??= getImageJobIdKey(job.jobId);
@@ -158,38 +160,40 @@ async function followStatusJob(job: ImageJob, persist: boolean, allowPoll: boole
   if (allowPoll) await pollStatusUntilDone(job.jobId, persist);
 }
 
-/** Apply a get_image_job_result snapshot: paint progressive assets; stop only on terminal status. */
 async function applyJobSnapshot(job: ImageJob, persist: boolean): Promise<"continue" | "done"> {
-  const partial = jobToImageResult(job);
-  if (partial && bindImageResult(partial)) {
-    renderAssets(partial, isTerminalImageJobStatus(job.status) && persist);
+  if (!imageJobMatchesBinding(boundResultKey, job.jobId) && boundResultKey !== undefined) {
+    if (activeJobId !== job.jobId) return "done";
   }
+  boundResultKey ??= getImageJobIdKey(job.jobId);
+
+  renderJobGallery(job);
 
   const next = planAfterStatus(job);
   if (next.kind === "render") {
-    if (bindImageResult(next.imageResult)) renderAssets(next.imageResult, persist);
+    if (bindImageResult(next.imageResult)) renderCompletedGallery(next.imageResult, persist);
     activeJobId = undefined;
+    progressNote = undefined;
     return "done";
   }
   if (next.kind === "lost") {
-    if (!partial) showLost(next.reason, persist, job.jobId);
+    if (!slots.some((slot) => slot.status === "ready")) {
+      showLost(next.reason, persist, job.jobId);
+    } else {
+      progressNote = undefined;
+      showIndex(activeIndex);
+    }
     activeJobId = undefined;
     return "done";
   }
 
-  showProgressChrome(job);
   return "continue";
 }
 
-/**
- * Refresh / remount: one status check, then either show result,
- * mark lost, or continue polling only if still in progress.
- */
 async function probeStatusThenFollow(jobId: string, persist: boolean): Promise<void> {
   if (!stillBoundToJob(jobId)) return;
   boundResultKey ??= getImageJobIdKey(jobId);
   activeJobId = jobId;
-  showInProgress("running");
+  showPendingGallery(jobId, "running");
   if (persist) persistInProgress(jobId);
 
   try {
@@ -209,7 +213,7 @@ async function probeStatusThenFollow(jobId: string, persist: boolean): Promise<v
     }
     const imageResult = getImageResult(polled);
     if (imageResult && bindImageResult(imageResult)) {
-      renderAssets(imageResult, persist);
+      renderCompletedGallery(imageResult, persist);
       return;
     }
     showLost("无法解析生图任务状态。", persist, jobId);
@@ -218,7 +222,6 @@ async function probeStatusThenFollow(jobId: string, persist: boolean): Promise<v
   }
 }
 
-/** Poll after each response returns, then wait 2s before the next request. */
 async function pollStatusUntilDone(jobId: string, persist: boolean): Promise<void> {
   if (!stillBoundToJob(jobId)) return;
   if (pollInFlight) return;
@@ -248,7 +251,7 @@ async function pollStatusUntilDone(jobId: string, persist: boolean): Promise<voi
         }
         const imageResult = getImageResult(polled);
         if (imageResult) {
-          if (bindImageResult(imageResult)) renderAssets(imageResult, persist);
+          if (bindImageResult(imageResult)) renderCompletedGallery(imageResult, persist);
           activeJobId = undefined;
           return;
         }
@@ -276,81 +279,208 @@ async function pollStatusUntilDone(jobId: string, persist: boolean): Promise<voi
 }
 
 async function recoverAfterMissingJob(persist: boolean, fallbackMessage: string): Promise<void> {
-  if (current) return;
+  if (slots.some((slot) => slot.status === "ready")) {
+    progressNote = undefined;
+    showIndex(activeIndex);
+    return;
+  }
   const cached = getImageResult(window.openai?.widgetState);
   if (cached && bindImageResult(cached)) {
-    renderAssets(cached, false);
+    renderCompletedGallery(cached, false);
     return;
   }
   showLost(fallbackMessage, persist, activeJobId);
 }
 
-function renderAssets(data: ImageResult, persistCompletedSnapshot: boolean): void {
-  const resultKey = getImageResultKey(data);
-  const previousAssets = current?.assets ?? [];
-  const previousCount = previousAssets.length;
+function showPendingGallery(jobId: string, status: string): void {
+  progressNote = `生成中（${status}）`;
+  const total = Math.max(slots.length, 1);
+  slots = Array.from({ length: total }, () => ({ status: "pending" as const }));
+  current = {
+    jobId,
+    model: current?.model ?? "WJ",
+    assets: [],
+  };
+  paintGallery(true);
+}
+
+function renderJobGallery(job: ImageJob): void {
+  const total = Math.max(
+    1,
+    job.progress?.total ?? 0,
+    job.assets.length,
+    (job.failures?.reduce((max, item) => Math.max(max, item.index + 1), 0) ?? 0),
+  );
+  const nextSlots = buildSlotsFromJob(job, total);
+  const progress = job.progress;
+  progressNote = isTerminalImageJobStatus(job.status)
+    ? undefined
+    : progress
+      ? `生成中 ${progress.succeeded}/${progress.total} 成功`
+        + (progress.failed ? ` · ${progress.failed} 失败` : "")
+        + (progress.pending ? ` · ${progress.pending} 待完成` : "")
+      : `生成中（${job.status}）`;
+
+  const readyAssets = nextSlots
+    .filter((slot): slot is { status: "ready"; asset: ImageAsset } => slot.status === "ready")
+    .map((slot) => slot.asset);
+
+  current = {
+    jobId: job.jobId,
+    model: job.model,
+    resolution: job.resolution,
+    aspectRatio: job.aspectRatio,
+    durationMs: job.durationMs,
+    assets: readyAssets,
+    failureCount: job.failures?.length ?? 0,
+    createdAt: job.createdAt,
+    expiresAt: job.expiresAt,
+  };
+  slots = nextSlots;
+  paintGallery(false);
+}
+
+function renderCompletedGallery(data: ImageResult, persistCompletedSnapshot: boolean): void {
+  progressNote = undefined;
+  activeJobId = undefined;
   current = data;
-
-  if (renderedResultKey === resultKey) {
-    updateChrome(data);
-    if (persistCompletedSnapshot) persistCompleted(data, true, resultKey);
-    return;
+  slots = data.assets.map((asset) => ({ status: "ready" as const, asset }));
+  paintGallery(true);
+  if (persistCompletedSnapshot) {
+    persistCompleted(data, true, getImageResultKey(data));
   }
+}
 
-  const appendOnly = renderedResultKey !== undefined
-    && previousCount > 0
-    && data.assets.length >= previousCount
-    && previousAssets.every((asset, index) => asset.url === data.assets[index]?.url);
+function buildSlotsFromJob(job: ImageJob, total: number): GallerySlot[] {
+  const assetByIndex = new Map<number, ImageAsset>();
+  for (const [order, asset] of job.assets.entries()) {
+    assetByIndex.set(asset.prompt_index ?? order, asset);
+  }
+  const failureByIndex = new Map((job.failures ?? []).map((failure) => [failure.index, failure.error]));
 
-  renderedResultKey = resultKey;
-  if (!appendOnly) {
-    activeIndex = 0;
+  return Array.from({ length: total }, (_, index) => {
+    const asset = assetByIndex.get(index);
+    if (asset) return { status: "ready" as const, asset };
+    if (failureByIndex.has(index)) {
+      return { status: "failed" as const, error: failureByIndex.get(index) };
+    }
+    return { status: "pending" as const };
+  });
+}
+
+function paintGallery(resetIndex: boolean): void {
+  const slotKey = slots.map((slot) => {
+    if (slot.status === "ready") return `r:${slot.asset.url}`;
+    if (slot.status === "failed") return `f:${slot.error ?? ""}`;
+    return "p";
+  }).join("|");
+
+  const structureChanged = renderedSlotKey !== slotKey;
+  renderedSlotKey = slotKey;
+
+  if (structureChanged) {
     thumbs.replaceChildren();
-  }
-  thumbs.hidden = data.assets.length < 2;
+    for (const [index, slot] of slots.entries()) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "thumb";
+      button.title = slot.status === "ready"
+        ? `选择第 ${index + 1} 张`
+        : slot.status === "failed"
+          ? `第 ${index + 1} 张失败`
+          : `第 ${index + 1} 张生成中`;
+      button.setAttribute("aria-label", button.title);
 
-  const startIndex = appendOnly ? previousCount : 0;
-  for (let index = startIndex; index < data.assets.length; index += 1) {
-    const asset = data.assets[index];
-    if (!asset) continue;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "thumb";
-    button.title = `选择第 ${index + 1} 张`;
-    button.setAttribute("aria-label", `选择第 ${index + 1} 张`);
-    const image = document.createElement("img");
-    image.src = asset.url;
-    image.alt = `生成图片 ${index + 1}`;
-    image.loading = index === 0 ? "eager" : "lazy";
-    image.decoding = "async";
-    image.referrerPolicy = "no-referrer";
-    image.draggable = false;
-    button.append(image);
-    button.addEventListener("click", () => showIndex(index));
-    thumbs.append(button);
+      if (slot.status === "ready") {
+        const image = document.createElement("img");
+        image.src = slot.asset.url;
+        image.alt = `生成图片 ${index + 1}`;
+        image.loading = index === 0 ? "eager" : "lazy";
+        image.decoding = "async";
+        image.referrerPolicy = "no-referrer";
+        button.append(image);
+      } else if (slot.status === "pending") {
+        button.classList.add("is-pending");
+        const skeleton = document.createElement("div");
+        skeleton.className = "skeleton thumb-skeleton";
+        button.append(skeleton);
+      } else {
+        button.classList.add("is-failed");
+        button.textContent = "失败";
+      }
+
+      button.addEventListener("click", () => showIndex(index));
+      thumbs.append(button);
+    }
   }
 
-  if (!appendOnly || previousCount === 0) showIndex(0);
-  else updateChrome(data);
-  if (persistCompletedSnapshot) persistCompleted(data, true, resultKey);
+  thumbs.hidden = slots.length < 2;
+  errorBox.hidden = true;
+  result.hidden = false;
+
+  if (resetIndex || activeIndex >= slots.length) activeIndex = 0;
+  // Prefer first ready slot on first paint when current selection is still pending.
+  if (resetIndex) {
+    const firstReady = slots.findIndex((slot) => slot.status === "ready");
+    if (firstReady >= 0) activeIndex = firstReady;
+  }
+  showIndex(activeIndex);
 }
 
 function showIndex(nextIndex: number): void {
-  if (!current?.assets.length) return;
-  const total = current.assets.length;
+  if (!slots.length) return;
+  const total = slots.length;
   activeIndex = ((nextIndex % total) + total) % total;
-  const asset = current.assets[activeIndex];
-
-  if (asset) {
-    mainImage.src = asset.url;
-    mainImage.alt = `WJ 生成图片 ${activeIndex + 1}`;
-  }
+  const slot = slots[activeIndex];
 
   thumbs.querySelectorAll(".thumb").forEach((node, index) => {
     node.classList.toggle("is-active", index === activeIndex);
   });
 
-  updateChrome(current);
+  if (!slot || slot.status === "pending") {
+    mainImage.hidden = true;
+    mainImage.removeAttribute("src");
+    mainFailed.hidden = true;
+    mainSkeleton.hidden = false;
+  } else if (slot.status === "failed") {
+    mainImage.hidden = true;
+    mainImage.removeAttribute("src");
+    mainSkeleton.hidden = true;
+    mainFailed.hidden = false;
+    mainFailed.textContent = slot.error ?? `第 ${activeIndex + 1} 张生成失败`;
+  } else {
+    mainSkeleton.hidden = true;
+    mainFailed.hidden = true;
+    mainImage.hidden = false;
+    mainImage.src = slot.asset.url;
+    mainImage.alt = `WJ 生成图片 ${activeIndex + 1}`;
+  }
+
+  updateChrome();
+}
+
+function updateChrome(): void {
+  const slot = slots[activeIndex];
+  const readyCount = slots.filter((item) => item.status === "ready").length;
+  model.textContent = current?.model ?? "WJ";
+  details.textContent = [
+    current?.resolution,
+    current?.aspectRatio,
+    slots.length > 1 ? `${activeIndex + 1}/${slots.length}` : undefined,
+    slot?.status === "ready" && slot.asset.width && slot.asset.height
+      ? `${slot.asset.width}×${slot.asset.height}`
+      : undefined,
+    slot?.status === "ready"
+      ? formatDuration(slot.asset.duration_ms ?? current?.durationMs)
+      : undefined,
+    readyCount > 0 && readyCount < slots.length ? `已出 ${readyCount}` : undefined,
+    current?.failureCount ? `失败 ${current.failureCount}` : undefined,
+    progressNote,
+  ].filter(Boolean).join(" · ");
+
+  openButton.disabled = slot?.status !== "ready";
+  errorBox.hidden = true;
+  result.hidden = false;
 }
 
 function persistCompleted(data: ImageResult, persist: boolean, resultKey: string): void {
@@ -406,7 +536,7 @@ function scheduleCompatibilityRestore(): void {
   cancelCompatibilityRestore();
   compatibilityRestoreTimer = window.setTimeout(() => {
     compatibilityRestoreTimer = undefined;
-    if (current || boundResultKey) return;
+    if (current || slots.length > 0 || boundResultKey) return;
     const bridge = window.openai;
     const sources = [bridge?.toolOutput, bridge?.toolResponseMetadata];
     for (const source of sources) {
@@ -425,59 +555,12 @@ function cancelCompatibilityRestore(): void {
   compatibilityRestoreTimer = undefined;
 }
 
-function updateChrome(data: ImageResult): void {
-  const total = data.assets.length;
-  const asset = data.assets[activeIndex];
-  model.textContent = data.model;
-  details.textContent = [
-    data.resolution,
-    data.aspectRatio,
-    total > 1 ? `${activeIndex + 1}/${total}` : undefined,
-    asset?.width && asset?.height ? `${asset.width}×${asset.height}` : undefined,
-    formatDuration(asset?.duration_ms ?? data.durationMs),
-    data.failureCount ? `失败 ${data.failureCount}` : undefined,
-  ].filter(Boolean).join(" · ");
-  errorBox.hidden = true;
-  result.hidden = false;
-  if (activeJobId) {
-    loading.hidden = false;
-  } else {
-    loading.hidden = true;
-  }
+function currentReadyAsset(): ImageAsset | undefined {
+  const slot = slots[activeIndex];
+  return slot?.status === "ready" ? slot.asset : undefined;
 }
 
-function currentAsset() {
-  return current?.assets[activeIndex];
-}
-
-function showProgressChrome(job: ImageJob): void {
-  const progress = job.progress;
-  const progressLabel = progress
-    ? `${progress.succeeded}/${progress.total} 成功`
-    + (progress.failed ? ` · ${progress.failed} 失败` : "")
-    + (progress.pending ? ` · ${progress.pending} 待完成` : "")
-    : job.status;
-  loading.hidden = false;
-  errorBox.hidden = true;
-  loadingText.textContent = current
-    ? `WJ 继续生成中（${progressLabel}）…`
-    : `WJ 正在生成图片（${progressLabel}）…`;
-  if (!current) result.hidden = true;
-}
-
-function showInProgress(status: string): void {
-  loading.hidden = false;
-  errorBox.hidden = true;
-  if (!current) result.hidden = true;
-  loadingText.textContent = `WJ 正在生成图片（${status}）…`;
-}
-
-function showLost(
-  message: string,
-  persist = false,
-  jobId?: string,
-): void {
-  loading.hidden = true;
+function showLost(message: string, persist = false, jobId?: string): void {
   result.hidden = true;
   errorBox.textContent = message;
   errorBox.hidden = false;

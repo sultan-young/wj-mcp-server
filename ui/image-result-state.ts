@@ -4,6 +4,7 @@ export type ImageAsset = {
   width?: number;
   height?: number;
   duration_ms?: number;
+  prompt_index?: number;
 };
 
 export type ImageResult = {
