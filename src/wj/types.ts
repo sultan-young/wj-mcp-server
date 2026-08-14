@@ -59,6 +59,12 @@ export function parseGenerateImageInput(raw: unknown): GenerateImageInput {
   };
 }
 
+/** Persisted job input — always has resolution after parse (fills model default if missing). */
+export const storedGenerateImageInputSchema = generateImageInputSchema.transform((value): GenerateImageInput => ({
+  ...value,
+  resolution: value.resolution ?? defaultResolutionForModel(value.model),
+}));
+
 export const imageAssetSchema = z.object({
   type: z.string().default("image"),
   mime_type: z.string().default("image/png"),

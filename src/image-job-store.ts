@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import type { RedisClient } from "./redis.js";
-import { generateImageInputSchema, imageAssetSchema, type GenerateImageInput } from "./wj/types.js";
+import { storedGenerateImageInputSchema, imageAssetSchema, type GenerateImageInput } from "./wj/types.js";
 
 const JOB_KEY_PREFIX = "wj:mcp:image-job:";
 
@@ -30,7 +30,7 @@ export const imageJobRecordSchema = z.object({
   resolution: z.string(),
   aspectRatio: z.string(),
   promptTotal: z.number().int().positive(),
-  input: generateImageInputSchema,
+  input: storedGenerateImageInputSchema,
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   expiresAt: z.string().datetime(),
