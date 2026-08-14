@@ -29,6 +29,7 @@ import {
 } from "../wj/product-draft-types.js";
 import {
   generateImageInputSchema,
+  parseGenerateImageInput,
   imageAssetSchema,
 } from "../wj/types.js";
 
@@ -132,7 +133,7 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
     {
       title: "使用 WJ 生成图片",
       description:
-        "Submit WJ image generation/editing and return a jobId immediately. Always pass prompts as a string array (1–10); one image uses [\"...\"]. Optional gpt_reference_images (file params, up to 10) are shared across every prompt in the call. Default to gpt-image-2 and 2K. After the jobId is returned, reply that the job was accepted; the WJ image component shows results—do not wait or poll in the model turn. Do not claim images are ready until the component shows assets. Never use markdown image embeds. Each generated image consumes WJ quota.",
+        "Submit WJ image generation/editing and return a jobId immediately. Always pass prompts as a string array (1–10); one image uses [\"...\"]. Optional gpt_reference_images (file params, up to 10) are shared across every prompt in the call. Default to gpt-image-2 and 1K (nano-banana-2 defaults to 2K). After the jobId is returned, reply that the job was accepted; the WJ image component shows results—do not wait or poll in the model turn. Do not claim images are ready until the component shows assets. Never use markdown image embeds. Each generated image consumes WJ quota.",
       inputSchema: generateImageInputSchema,
       outputSchema: imageJobOutputSchema,
       annotations: {
@@ -150,7 +151,7 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
     },
     async (rawInput, extra) => {
       try {
-        const input = generateImageInputSchema.parse(rawInput);
+        const input = parseGenerateImageInput(rawInput);
         const subject = String(extra.authInfo?.extra?.subject ?? "wj-shared-access");
         const terminalId = String(extra.authInfo?.extra?.terminalId ?? extra.authInfo?.clientId ?? subject);
         const job = await generation.submit(subject, terminalId, input);

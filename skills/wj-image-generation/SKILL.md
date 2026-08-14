@@ -34,7 +34,7 @@ Use `generate_image` for creation and editing. It returns a `jobId` immediately.
 
 1. Preserve the user's subject, style, composition, aspect ratio, resolution, and reference-image intent.
 2. Always pass `prompts` as a string array (1–10). A single image uses a one-element array.
-3. Default to `gpt-image-2`, `2K`, and `1:1` only when the user does not specify supported alternatives.
+3. Default to `gpt-image-2`, `1K`, and `1:1` only when the user does not specify supported alternatives. When using `nano-banana-2`, default resolution to `2K` unless the user specifies otherwise.
 4. Use `nano-banana-2` only when the user explicitly requests it.
 5. For same-prompt variants within one shared-reference call, repeat that text in `prompts`. For different texts with the same references, put each distinct text in `prompts`.
 6. Pass ChatGPT attachments through `gpt_reference_images` (official file params, up to 10). Within one call they are shared by every `prompts` entry.

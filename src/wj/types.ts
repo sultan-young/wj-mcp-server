@@ -20,6 +20,7 @@ export const openAIFileSchema = z
 
 const promptTextSchema = z.string().trim().min(1).max(8_000);
 
+/** MCP / tool JSON Schema — resolution stays optional so hosts advertise the field correctly. */
 export const generateImageInputSchema = z.object({
   prompts: z
     .array(promptTextSchema)
@@ -30,7 +31,9 @@ export const generateImageInputSchema = z.object({
     ),
   model: imageModelSchema.default("gpt-image-2").describe("Use gpt-image-2 unless the user explicitly requests another model."),
   aspect_ratio: aspectRatioSchema.default("1:1").describe("Output image aspect ratio (shared by all prompts)."),
-  resolution: resolutionSchema.default("2K").describe("Default to 2K unless the user explicitly requests 1K or 4K."),
+  resolution: resolutionSchema
+    .optional()
+    .describe("Defaults to 1K for gpt-image-2 and 2K for nano-banana-2 unless the user explicitly requests another supported size."),
   gpt_reference_images: z
     .array(openAIFileSchema)
     .max(10)
@@ -39,6 +42,22 @@ export const generateImageInputSchema = z.object({
       "Optional ChatGPT image attachments shared by every prompt in this call (openai/fileParams). Up to 10. Preserve attachment order; when editing, put the image being edited first, then other references. Describe changes in each prompts entry.",
     ),
 });
+
+export function defaultResolutionForModel(model: z.infer<typeof imageModelSchema>): z.infer<typeof resolutionSchema> {
+  return model === "nano-banana-2" ? "2K" : "1K";
+}
+
+export type GenerateImageInput = Omit<z.infer<typeof generateImageInputSchema>, "resolution"> & {
+  resolution: z.infer<typeof resolutionSchema>;
+};
+
+export function parseGenerateImageInput(raw: unknown): GenerateImageInput {
+  const value = generateImageInputSchema.parse(raw);
+  return {
+    ...value,
+    resolution: value.resolution ?? defaultResolutionForModel(value.model),
+  };
+}
 
 export const imageAssetSchema = z.object({
   type: z.string().default("image"),
@@ -68,7 +87,6 @@ export const wjImageResponseSchema = z.object({
   data: wjImageDataSchema,
 });
 
-export type GenerateImageInput = z.infer<typeof generateImageInputSchema>;
 export type ImageAsset = z.infer<typeof imageAssetSchema>;
 export type WjImageData = z.infer<typeof wjImageDataSchema>;
 

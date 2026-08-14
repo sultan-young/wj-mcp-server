@@ -209,7 +209,7 @@ describe("WJ MCP server", () => {
       prompt: "A quiet futuristic city",
       model: "gpt-image-2",
       aspect_ratio: "1:1",
-      resolution: "2K",
+      resolution: "1K",
     }));
 
     const generateCallsBeforeRecovery = generateImage.mock.calls.length;
