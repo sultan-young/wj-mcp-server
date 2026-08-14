@@ -27,17 +27,21 @@ import {
   validateProductDraftResultSchema,
 } from "./product-draft-types.js";
 import { type WjGenerateImageRequest, type WjImageData, resolveGenerateReferenceUrls, wjImageResponseSchema } from "./types.js";
+import { extractWjCallData, type WjCallData } from "./call-data.js";
 import { z } from "zod";
 
 export class WjApiError extends Error {
   constructor(
     message: string,
     readonly status?: number,
+    readonly callData?: WjCallData,
   ) {
     super(message);
     this.name = "WjApiError";
   }
 }
+
+export { appendWjCallData, formatWjCallData, type WjCallData } from "./call-data.js";
 
 export class WjClient {
   constructor(
@@ -111,13 +115,15 @@ export class WjClient {
 
     if (!response.ok) {
       const upstreamMessage = extractUpstreamMessage(json);
+      const callData = extractWjCallData(json);
       this.logger.warn({
         status: response.status,
         durationMs: Date.now() - startedAt,
         upstreamMessage,
+        callData,
         bodyKeys: objectKeys(json),
       }, "WJ image request failed");
-      throw new WjApiError(upstreamMessage ?? `WJ request failed with HTTP ${response.status}`, response.status);
+      throw new WjApiError(upstreamMessage ?? `WJ request failed with HTTP ${response.status}`, response.status, callData);
     }
 
     const parsed = wjImageResponseSchema.safeParse(json);
@@ -140,7 +146,11 @@ export class WjClient {
           ? ((json as { data: { assets: unknown[] } }).data.assets.length)
           : undefined,
       }, "Invalid WJ image response");
-      throw new WjApiError(parsed.success ? parsed.data.message ?? "WJ reported generation failure" : "WJ returned an invalid image response", response.status);
+      throw new WjApiError(
+        parsed.success ? parsed.data.message ?? "WJ reported generation failure" : "WJ returned an invalid image response",
+        response.status,
+        extractWjCallData(json),
+      );
     }
 
     for (const asset of parsed.data.data.assets) {
@@ -303,7 +313,11 @@ export class WjClient {
     }
 
     if (!response.ok) {
-      throw new WjApiError(extractUpstreamMessage(json) ?? `WJ ${operation} failed with HTTP ${response.status}`, response.status);
+      throw new WjApiError(
+        extractUpstreamMessage(json) ?? `WJ ${operation} failed with HTTP ${response.status}`,
+        response.status,
+        extractWjCallData(json),
+      );
     }
     return json;
   }
@@ -312,9 +326,15 @@ export class WjClient {
 function extractUpstreamMessage(body: unknown): string | undefined {
   if (!body || typeof body !== "object") return undefined;
   const record = body as Record<string, unknown>;
-  for (const key of ["message", "error_description", "error"]) {
-    const value = record[key];
-    if (typeof value === "string" && value.length <= 500) return value;
+  if (typeof record.message === "string" && record.message.length <= 500) return record.message;
+  const err = record.error;
+  if (typeof err === "string" && err.length <= 500) return err;
+  if (err && typeof err === "object") {
+    const msg = (err as { message?: unknown }).message;
+    if (typeof msg === "string" && msg.length <= 500) return msg;
+  }
+  if (typeof record.error_description === "string" && record.error_description.length <= 500) {
+    return record.error_description;
   }
   return undefined;
 }

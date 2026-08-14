@@ -235,6 +235,34 @@ describe("GenerationService", () => {
     expect(completed?.error).toContain("1 of 2");
   });
 
+  it("includes LiteLLM call_data on a fully failed job", async () => {
+    const { WjApiError } = await import("../src/wj/client.js");
+    const generateImage = vi.fn().mockRejectedValue(new WjApiError("quota exceeded", 502, {
+      call_id: "call-9",
+      model_id: "dep-3",
+      model_api_base: "https://api.grsai.com/v1",
+    }));
+    const service = testGenerationService({ generateImage });
+    const accepted = await service.submit("subject", "terminal", {
+      prompts: ["fail"],
+      model: "gpt-image-2",
+      aspect_ratio: "1:1",
+      resolution: "2K",
+    });
+    const failed = await waitUntilTerminal(service, "subject", accepted.jobId);
+    expect(failed?.status).toBe("failed");
+    expect(failed?.error).toContain("quota exceeded");
+    expect(failed?.error).toContain("call_id=call-9");
+    expect(failed?.error).toContain("model_id=dep-3");
+    expect(failed?.error).toContain("model_api_base=https://api.grsai.com/v1");
+    expect(failed?.failures).toEqual([
+      expect.objectContaining({
+        index: 0,
+        error: expect.stringContaining("call_id=call-9"),
+      }),
+    ]);
+  });
+
   it("submits a job immediately and completes via polling", async () => {
     const generateImage = vi.fn(async () => {
       await new Promise((resolve) => setTimeout(resolve, 30));

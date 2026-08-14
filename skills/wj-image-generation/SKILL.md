@@ -51,4 +51,4 @@ Use `generate_image` for creation and editing. It returns a `jobId` immediately.
 7. `get_image_job_result` requires `job_id`. Read-only; no WJ image quota. Model use is for recovery only.
 8. If recovery is unavailable: paste plain-text HTTPS original links from the tool result (URLs only, no markdown image syntax). Do not regenerate automatically.
 9. Retry the same request at most once for a transient timeout or `502`-class upstream failure on job submission.
-10. Do not retry authentication, authorization, WJ quota, or WJ rate-limit failures reported on a failed job. Report the actionable error clearly.
+10. Do not retry authentication, authorization, WJ quota, or WJ rate-limit failures reported on a failed job. Report the actionable error clearly, including LiteLLM `call_id`, `model_id`, and `model_api_base` when the failed job includes them.

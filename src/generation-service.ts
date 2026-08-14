@@ -3,7 +3,7 @@ import pLimit from "p-limit";
 import type { AppConfig } from "./config.js";
 import { ImageJobStore, type ImageJobView, type ImagePromptFailure } from "./image-job-store.js";
 import type { AppLogger } from "./logger.js";
-import { WjApiError, WjClient } from "./wj/client.js";
+import { WjApiError, WjClient, appendWjCallData } from "./wj/client.js";
 import {
   type GenerateImageInput,
   resolveGenerateJobs,
@@ -258,9 +258,16 @@ function stampAssetDurations(result: WjImageData, promptIndex?: number): WjImage
 
 function toJobErrorMessage(error: unknown): string {
   if (error instanceof WjApiError) {
-    if (error.status === 401 || error.status === 403) return `WJ request was rejected with HTTP ${error.status}: ${error.message}`;
-    if (error.status === 429) return "WJ is currently rate-limited. Please try again later.";
-    return error.message;
+    if (error.status === 401 || error.status === 403) {
+      return appendWjCallData(
+        `WJ request was rejected with HTTP ${error.status}: ${error.message}`,
+        error.callData,
+      );
+    }
+    if (error.status === 429) {
+      return appendWjCallData("WJ is currently rate-limited. Please try again later.", error.callData);
+    }
+    return appendWjCallData(error.message, error.callData);
   }
   if (error instanceof Error && error.message) return error.message;
   return "WJ image job failed unexpectedly.";

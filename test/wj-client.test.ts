@@ -52,6 +52,36 @@ describe("WjClient", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("attaches LiteLLM call_data from a WJ error body", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: false,
+      error: { code: "upstream_error", message: "quota exceeded" },
+      meta: {
+        call_data: {
+          call_id: "call-1",
+          model_id: "dep-9",
+          model_api_base: "https://api.openai.com/v1",
+        },
+      },
+    }), { status: 502, headers: { "content-type": "application/json" } }));
+    const client = new WjClient(testConfig(), testLogger(), fetchMock);
+
+    await expect(client.generateImage({
+      model: "gpt-image-2",
+      prompt: "test",
+      aspect_ratio: "1:1",
+      resolution: "1K",
+    })).rejects.toEqual(expect.objectContaining({
+      status: 502,
+      message: "quota exceeded",
+      callData: {
+        call_id: "call-1",
+        model_id: "dep-9",
+        model_api_base: "https://api.openai.com/v1",
+      },
+    }));
+  });
+
   it("forwards ChatGPT attachment download URLs as WJ input_images", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       success: true,

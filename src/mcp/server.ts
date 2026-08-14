@@ -9,7 +9,7 @@ import { imageJobStatusSchema, imagePromptFailureSchema, type ImageJobView } fro
 import { UsageLimitError } from "../limits.js";
 import type { AppLogger } from "../logger.js";
 import { APP_VERSION } from "../version.js";
-import { WjApiError, type WjClient } from "../wj/client.js";
+import { appendWjCallData, WjApiError, type WjClient } from "../wj/client.js";
 import {
   calculateProfitToolInputSchema,
   profitCalculationDataSchema,
@@ -650,9 +650,16 @@ function buildImageJobToolResult(job: ImageJobView, phase: "accepted" | "polled"
 function toSafeToolError(error: unknown): string {
   if (error instanceof UsageLimitError) return error.message;
   if (error instanceof WjApiError) {
-    if (error.status === 401 || error.status === 403) return `WJ request was rejected with HTTP ${error.status}: ${error.message}`;
-    if (error.status === 429) return "WJ is currently rate-limited. Please try again later.";
-    return error.message;
+    if (error.status === 401 || error.status === 403) {
+      return appendWjCallData(
+        `WJ request was rejected with HTTP ${error.status}: ${error.message}`,
+        error.callData,
+      );
+    }
+    if (error.status === 429) {
+      return appendWjCallData("WJ is currently rate-limited. Please try again later.", error.callData);
+    }
+    return appendWjCallData(error.message, error.callData);
   }
   if (error instanceof z.ZodError) return `Invalid request: ${error.issues[0]?.message ?? "validation failed"}`;
   return "WJ tool request failed unexpectedly. Please try again.";
