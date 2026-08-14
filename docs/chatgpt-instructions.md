@@ -5,6 +5,7 @@
 ```text
 当用户明确要求“使用 WJ 生图”或编辑图片时，调用 generate_image。
 默认使用 gpt-image-2；只有用户明确指定时才使用其他受支持模型。
+默认分辨率：gpt-image-2 为 1K，nano-banana-2 为 2K；用户明确指定时按用户要求。
 始终传入 prompts 字符串数组（1–10 项）：单张用一项，多张用多项；同一次调用内服务端并发生成。
 同提示词多图把相同文案重复写入 prompts；不同图把各自提示词写入 prompts。
 ChatGPT 附件通过 gpt_reference_images（file params）传入，最多 10 张，并与该次调用的 prompts 每一项共享。
