@@ -174,10 +174,10 @@ async function applyJobSnapshot(job: ImageJob, persist: boolean): Promise<"conti
     return "done";
   }
   if (next.kind === "lost") {
-    if (!slots.some((slot) => slot.status === "ready")) {
-      showLost(next.reason, persist, job.jobId);
-    } else {
+    if (slots.some((slot) => slot.status === "ready")) {
       showIndex(activeIndex);
+    } else {
+      showLost(next.reason, persist, job.jobId);
     }
     activeJobId = undefined;
     return "done";
@@ -343,12 +343,20 @@ function buildSlotsFromJob(job: ImageJob, total: number): GallerySlot[] {
     assetByIndex.set(asset.prompt_index ?? order, asset);
   }
   const failureByIndex = new Map((job.failures ?? []).map((failure) => [failure.index, failure.error]));
+  const terminalFailed = job.status === "failed" || job.status === "timed_out";
 
   return Array.from({ length: total }, (_, index) => {
     const asset = assetByIndex.get(index);
     if (asset) return { status: "ready" as const, asset };
     if (failureByIndex.has(index)) {
       return { status: "failed" as const, error: failureByIndex.get(index) };
+    }
+    // Terminal jobs must not leave pending skeletons — that looks like an empty collapse.
+    if (terminalFailed) {
+      return {
+        status: "failed" as const,
+        error: job.error ?? `第 ${index + 1} 张生成失败`,
+      };
     }
     return { status: "pending" as const };
   });
@@ -545,11 +553,33 @@ function currentReadyAsset(): ImageAsset | undefined {
 }
 
 function showLost(message: string, persist = false, jobId?: string): void {
-  result.hidden = true;
-  errorBox.textContent = message;
-  errorBox.hidden = false;
+  // Keep the gallery chrome visible. Hiding #result collapses the iframe to a blank white slab in ChatGPT.
+  activeJobId = undefined;
+  current = {
+    jobId: jobId ?? current?.jobId,
+    model: current?.model ?? "WJ",
+    resolution: current?.resolution,
+    aspectRatio: current?.aspectRatio,
+    durationMs: current?.durationMs,
+    assets: [],
+    failureCount: Math.max(current?.failureCount ?? 0, 1),
+    createdAt: current?.createdAt,
+    expiresAt: current?.expiresAt,
+  };
+
+  if (slots.length > 0 && slots.every((slot) => slot.status !== "ready")) {
+    slots = slots.map((slot, index) => (
+      slot.status === "failed"
+        ? slot
+        : { status: "failed" as const, error: message || `第 ${index + 1} 张生成失败` }
+    ));
+  } else {
+    slots = [{ status: "failed", error: message || "生成失败" }];
+  }
+
+  paintGallery(true);
   if (persist) {
-    window.openai?.setWidgetState?.(createPersistedLostState(message, jobId));
+    window.openai?.setWidgetState?.(createPersistedLostState(message, jobId ?? current.jobId));
   }
 }
 

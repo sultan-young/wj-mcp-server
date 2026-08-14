@@ -227,10 +227,13 @@ main {
 }
 
 .stage-failed {
-  padding: 18px;
+  max-width: 28rem;
+  padding: 18px 22px;
   text-align: center;
   color: var(--color-text-secondary, #66736d);
   font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 :root[data-theme="dark"] .skeleton {
