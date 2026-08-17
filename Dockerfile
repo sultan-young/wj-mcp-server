@@ -6,7 +6,7 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
-COPY tsconfig.json tsconfig.build.json vite.config.ts ./
+COPY tsconfig.json tsconfig.build.json vite.config.ts vite.job-viewer.config.ts ./
 COPY src ./src
 COPY ui ./ui
 RUN pnpm build && pnpm prune --prod

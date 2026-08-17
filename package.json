@@ -18,7 +18,8 @@
     "test:watch": "vitest",
     "inspect": "npx @modelcontextprotocol/inspector@latest",
     "secrets": "node scripts/generate-secrets.mjs",
-    "check": "tsc --noEmit && vitest run --config vitest.config.ts && vite build && vite build --config vite.job-viewer.config.ts && tsc -p tsconfig.build.json"
+    "check": "tsc --noEmit && vitest run --config vitest.config.ts && vite build && vite build --config vite.job-viewer.config.ts && tsc -p tsconfig.build.json",
+    "docker:prod": "docker compose up -d --build --force-recreate wj-mcp-server"
   },
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "1.7.5",
