@@ -7,7 +7,7 @@ description: Generate, edit, and display images with the WJ MCP tools. Use when 
 
 Use `generate_image` for creation and editing. It returns a `jobId` immediately. After you receive the `jobId`, reply to the user right away and **always include**:
 1. the exact `jobId`
-2. the job lookup page URL with that id embedded: `https://mcp.zaowuwujie.ltd/jobs/<jobId>` (replace `<jobId>` with the real id so the link opens the query page and loads results immediately)
+2. the job lookup page URL with that id embedded: `http://ai.agi.zaowuwujie.ltd/mcp-jobs?jobId=<jobId>` (replace `<jobId>` with the real id so the link opens the query page and loads results immediately)
 
 The WJ image component shows results on its own. Use `get_image_job_result` with that same `jobId` only when the component failed or is missing.
 
@@ -49,7 +49,7 @@ The WJ image component shows results on its own. Use `get_image_job_result` with
 1. `generate_image` returns a `jobId` immediately (status `queued`/`running`). Treat this as job accepted, not as finished images.
 2. As soon as you have the `jobId`, reply to the user that WJ has accepted the job and the image component is generating. In **every** such reply, include:
    - the exact `jobId`
-   - the lookup URL `https://mcp.zaowuwujie.ltd/jobs/<jobId>` (full URL with the real job id, not the bare domain). Opening it shows the query page with that job already loaded.
+   - the lookup URL `http://ai.agi.zaowuwujie.ltd/mcp-jobs?jobId=<jobId>` (full URL with the real job id in the query string, not the bare domain). Opening it shows the query page with that job already loaded.
    Do **not** wait for completion yourself, and do **not** call `get_image_job_result` while the component is healthy.
 3. Prefer the WJ image component for display. Never paste markdown image embeds (`![](url)`).
 4. Do not claim images are ready until the component shows assets. You may say generation is in progress / accepted.

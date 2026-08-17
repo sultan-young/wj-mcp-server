@@ -17,6 +17,11 @@ export type PublicJobItem = {
   };
 };
 
+export type PublicImageJobMeta = {
+  /** Shared reference images for the whole job (from gpt_reference_images). */
+  referenceImageUrls: string[];
+};
+
 export type PublicImageJobView = {
   jobId: string;
   status: ImageJobStatus;
@@ -29,6 +34,7 @@ export type PublicImageJobView = {
   error?: string;
   durationMs?: number;
   progress: ImageJobProgress;
+  meta: PublicImageJobMeta;
   items: PublicJobItem[];
 };
 
@@ -38,7 +44,20 @@ export function isValidPublicJobId(jobId: string): boolean {
   return JOB_ID_RE.test(jobId.trim());
 }
 
-/** Public snapshot: prompts + assets, no subject / reference URLs. */
+function readReferenceImageUrls(record: ImageJobRecord): string[] {
+  const refs = record.input.gpt_reference_images ?? [];
+  const urls: string[] = [];
+  const seen = new Set<string>();
+  for (const file of refs) {
+    const url = file.download_url?.trim();
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    urls.push(url);
+  }
+  return urls;
+}
+
+/** Public snapshot: prompts, assets, and shared reference image URLs (no subject). */
 export function toPublicImageJobView(record: ImageJobRecord): PublicImageJobView {
   const prompts = record.input.prompts;
   const total = Math.max(record.promptTotal, prompts.length);
@@ -95,6 +114,9 @@ export function toPublicImageJobView(record: ImageJobRecord): PublicImageJobView
     updatedAt: record.updatedAt,
     expiresAt: record.expiresAt,
     progress: computeProgress(record),
+    meta: {
+      referenceImageUrls: readReferenceImageUrls(record),
+    },
     items,
     ...(record.error ? { error: record.error } : {}),
     ...(record.durationMs === undefined ? {} : { durationMs: record.durationMs }),

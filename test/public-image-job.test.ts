@@ -55,7 +55,43 @@ describe("public image job view", () => {
       expect.objectContaining({ index: 1, prompt: "beta", status: "failed", error: "boom" }),
       expect.objectContaining({ index: 2, prompt: "gamma", status: "failed" }),
     ]);
+    expect(view.meta.referenceImageUrls).toEqual([]);
     expect(view).not.toHaveProperty("subject");
+  });
+
+  it("exposes shared reference image URLs under meta", async () => {
+    const store = new ImageJobStore(memoryRedis(), 1_200, 2_592_000);
+    const record = await store.create({
+      subject: "subject",
+      terminalId: "terminal",
+      input: {
+        prompts: ["edit this"],
+        model: "gpt-image-2",
+        aspect_ratio: "1:1",
+        resolution: "1K",
+        gpt_reference_images: [
+          {
+            download_url: "https://files.example.com/ref-a.png",
+            file_id: "file_a",
+            mime_type: "image/png",
+          },
+          {
+            download_url: "https://files.example.com/ref-b.png",
+            file_id: "file_b",
+          },
+          {
+            download_url: "https://files.example.com/ref-a.png",
+            file_id: "file_a_dup",
+          },
+        ],
+      },
+    });
+
+    const view = toPublicImageJobView(record);
+    expect(view.meta.referenceImageUrls).toEqual([
+      "https://files.example.com/ref-a.png",
+      "https://files.example.com/ref-b.png",
+    ]);
   });
 });
 
