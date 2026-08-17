@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WJ 生图任务</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <div class="brand-mark" aria-hidden="true">WJ</div>
+        <div class="hero-copy">
+          <p class="eyebrow">无界 · 生图任务</p>
+          <h1>按 Job ID 查看结果</h1>
+          <p class="lede">顶部输入 <code>wj_job_…</code> 后点查询，即可查看该任务的图片与提示词，并支持单张或批量下载。也可直接打开带 Job ID 的链接自动查询。</p>
+        </div>
+      </header>
+
+      <form id="lookup-form" class="lookup" autocomplete="off">
+        <label for="job-id">Job ID</label>
+        <div class="lookup-row">
+          <input id="job-id" name="jobId" type="text" spellcheck="false" placeholder="wj_job_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+          <button type="submit" class="btn primary">查询</button>
+        </div>
+      </form>
+
+      <p id="status" class="status" hidden></p>
+
+      <section id="result" class="result" hidden>
+        <div class="meta-bar">
+          <div class="meta-main">
+            <strong id="meta-model">—</strong>
+            <span id="meta-status" class="pill">—</span>
+            <span id="meta-spec"></span>
+          </div>
+          <code id="meta-job" class="mono"></code>
+        </div>
+
+        <div class="toolbar">
+          <label class="check">
+            <input id="select-all" type="checkbox" />
+            <span>全选可下载</span>
+          </label>
+          <div class="toolbar-actions">
+            <button id="download-selected" type="button" class="btn secondary" disabled>下载选中</button>
+          </div>
+        </div>
+
+        <div id="gallery" class="gallery"></div>
+      </section>
+    </div>
+    <script type="module" src="/job-viewer.ts"></script>
+  </body>
+</html>

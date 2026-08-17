@@ -34,7 +34,7 @@ import {
 } from "../wj/types.js";
 
 export const IMAGE_WIDGET_URI = "ui://wj/image-result.html";
-export const WJ_IMAGE_SERVER_INSTRUCTIONS = `Use generate_image immediately when the user explicitly asks to use WJ, WJ image generation/editing, or 无界生图. Always pass prompts as a string array (1–10 entries); a single image uses a one-element array. gpt_reference_images are shared by every prompt in the same call. When every output shares the same references, use one generate_image with multiple prompts. When outputs need different reference subsets, issue one generate_image per subset and dispatch those independent calls concurrently in the same tool-call turn—never wait for one to finish before starting the next. Preserve attachment order; when editing, put the image being changed first in gpt_reference_images, then other references, and describe the change in each prompts entry. generate_image returns a jobId immediately; once you have the jobId, reply that the job was accepted and the WJ image component is generating—do not wait for completion and do not call get_image_job_result while the component is healthy. Do not claim images are ready until the component shows them. Never paste markdown image embeds (![](url)). If the component fails to load ("Failed to fetch template") or is missing: call get_image_job_result with job_id, then paste plain-text HTTPS links if needed. Never regenerate solely because the component failed. If native ChatGPT image generation explicitly reports quota exhaustion, rate limiting, or temporary unavailability, call WJ once without asking again. Default to gpt-image-2, 1K, and 1:1 unless specified otherwise. When using nano-banana-2, default resolution to 2K.
+export const WJ_IMAGE_SERVER_INSTRUCTIONS = `Use generate_image immediately when the user explicitly asks to use WJ, WJ image generation/editing, or 无界生图. Always pass prompts as a string array (1–10 entries); a single image uses a one-element array. gpt_reference_images are shared by every prompt in the same call. When every output shares the same references, use one generate_image with multiple prompts. When outputs need different reference subsets, issue one generate_image per subset and dispatch those independent calls concurrently in the same tool-call turn—never wait for one to finish before starting the next. Preserve attachment order; when editing, put the image being changed first in gpt_reference_images, then other references, and describe the change in each prompts entry. generate_image returns a jobId immediately; once you have the jobId, reply that the job was accepted and the WJ image component is generating, and always include both the exact jobId and the full lookup URL https://mcp.zaowuwujie.ltd/jobs/<jobId> (with the real jobId in the path, not the bare domain)—do not wait for completion and do not call get_image_job_result while the component is healthy. Do not claim images are ready until the component shows them. Never paste markdown image embeds (![](url)). If the component fails to load ("Failed to fetch template") or is missing: call get_image_job_result with job_id, then paste plain-text HTTPS links if needed. Never regenerate solely because the component failed. If native ChatGPT image generation explicitly reports quota exhaustion, rate limiting, or temporary unavailability, call WJ once without asking again. Default to gpt-image-2, 1K, and 1:1 unless specified otherwise. When using nano-banana-2, default resolution to 2K.
 
 For profit calculations, call calculate_profit first and clearly explain that the result has not been saved. Never save merely because the user asked for a calculation. Only call save_profit_calculation after the user explicitly confirms that the displayed calculation should be recorded. Recording requires an existing product SKU: if the user has not supplied one, ask for it and never invent it. Use a user-provided calculation name when available; otherwise generate a concise recognizable record_name from the country, product context, and price before saving.
 
@@ -133,7 +133,7 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
     {
       title: "使用 WJ 生成图片",
       description:
-        "Submit WJ image generation/editing and return a jobId immediately. Always pass prompts as a string array (1–10); one image uses [\"...\"]. Optional gpt_reference_images (file params, up to 10) are shared across every prompt in the call. Default to gpt-image-2 and 1K (nano-banana-2 defaults to 2K). After the jobId is returned, reply that the job was accepted; the WJ image component shows results—do not wait or poll in the model turn. Do not claim images are ready until the component shows assets. Never use markdown image embeds. Each generated image consumes WJ quota.",
+        "Submit WJ image generation/editing and return a jobId immediately. Always pass prompts as a string array (1–10); one image uses [\"...\"]. Optional gpt_reference_images (file params, up to 10) are shared across every prompt in the call. Default to gpt-image-2 and 1K (nano-banana-2 defaults to 2K). After the jobId is returned, reply that the job was accepted and always include the exact jobId plus the full lookup URL https://mcp.zaowuwujie.ltd/jobs/<jobId> (path must contain the real jobId); the WJ image component shows results—do not wait or poll in the model turn. Do not claim images are ready until the component shows assets. Never use markdown image embeds. Each generated image consumes WJ quota.",
       inputSchema: generateImageInputSchema,
       outputSchema: imageJobOutputSchema,
       annotations: {
@@ -155,7 +155,7 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
         const subject = String(extra.authInfo?.extra?.subject ?? "wj-shared-access");
         const terminalId = String(extra.authInfo?.extra?.terminalId ?? extra.authInfo?.clientId ?? subject);
         const job = await generation.submit(subject, terminalId, input);
-        return buildImageJobToolResult(job, "accepted");
+        return buildImageJobToolResult(job, "accepted", config.publicBaseUrl);
       } catch (error) {
         const message = toSafeToolError(error);
         logger.warn({ err: error, tool: "generate_image" }, "MCP image tool failed");
@@ -207,7 +207,7 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
             }],
           };
         }
-        return buildImageJobToolResult(view, "polled");
+        return buildImageJobToolResult(view, "polled", config.publicBaseUrl);
       } catch (error) {
         const message = toSafeToolError(error);
         logger.warn({ err: error, tool: "get_image_job_result" }, "MCP image lookup failed");
@@ -606,23 +606,25 @@ export function createWjMcpServer(dependencies: McpServerDependencies): McpServe
   return server;
 }
 
-function buildImageJobToolResult(job: ImageJobView, phase: "accepted" | "polled") {
+function buildImageJobToolResult(job: ImageJobView, phase: "accepted" | "polled", publicBaseUrl: URL) {
   const { progress } = job;
+  const lookupUrl = new URL(`/jobs/${job.jobId}`, publicBaseUrl).href;
   const lines = [
     phase === "accepted"
       ? `WJ accepted image job ${job.jobId} (${job.model}, ${job.resolution}, ${job.aspectRatio}).`
       : `WJ image job ${job.jobId} status: ${job.status}.`,
+    `Job ID: ${job.jobId}.`,
+    `Lookup page: ${lookupUrl}`,
     `Progress: ${progress.succeeded} succeeded, ${progress.failed} failed, ${progress.pending} pending (total ${progress.total}).`,
   ];
   if (phase === "accepted") {
     lines.push(
-      "Reply that the job was accepted; the WJ image component is generating. Do not wait or poll. Do not claim images are ready until the component shows them.",
+      "Reply that the job was accepted; the WJ image component is generating. Always include the Job ID and the Lookup page URL above (full URL with jobId in the path). Do not wait or poll. Do not claim images are ready until the component shows them.",
       "Never paste markdown image embeds (![](url)).",
     );
   }
   if (job.assets.length > 0) {
     lines.push(
-      `Job ID: ${job.jobId}.`,
       `Assets ready: ${job.assets.length}.`,
       ...(job.failures?.length
         ? [
@@ -643,7 +645,7 @@ function buildImageJobToolResult(job: ImageJobView, phase: "accepted" | "polled"
   return {
     structuredContent: job,
     content: [{ type: "text" as const, text: lines.join("\n") }],
-    _meta: { jobId: job.jobId, status: job.status, progress: job.progress },
+    _meta: { jobId: job.jobId, status: job.status, progress: job.progress, lookupUrl },
   };
 }
 

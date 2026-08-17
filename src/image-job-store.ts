@@ -106,6 +106,13 @@ export class ImageJobStore {
     return await this.expireIfNeeded(record);
   }
 
+  /** Public lookup by jobId only (no subject check). */
+  async getByJobId(jobId: string): Promise<ImageJobRecord | undefined> {
+    const record = await this.read(jobId);
+    if (!record) return undefined;
+    return await this.expireIfNeeded(record);
+  }
+
   async markRunning(jobId: string): Promise<ImageJobRecord | undefined> {
     return this.enqueueWrite(jobId, async () => {
       const record = await this.read(jobId);

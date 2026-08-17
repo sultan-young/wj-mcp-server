@@ -17,6 +17,7 @@ import { ImageJobStore } from "./image-job-store.js";
 import { UsageLimitError, UsageLimits } from "./limits.js";
 import type { AppLogger } from "./logger.js";
 import { createWjMcpServer } from "./mcp/server.js";
+import { createPublicImageJobRouter } from "./public-image-job-routes.js";
 import type { RedisClient } from "./redis.js";
 import { WjClient } from "./wj/client.js";
 
@@ -29,11 +30,14 @@ type AppDependencies = {
   redis: RedisClient;
   fetchImpl?: typeof fetch;
   widgetHtml?: string;
+  jobViewerHtml?: string;
 };
 
 export async function createApplication(dependencies: AppDependencies) {
   const { config, logger, redis } = dependencies;
   const widgetHtml = dependencies.widgetHtml ?? await readFile(resolve(process.cwd(), "dist/ui/image-result.html"), "utf8");
+  const jobViewerHtml = dependencies.jobViewerHtml
+    ?? await readFile(resolve(process.cwd(), "dist/ui/job-viewer.html"), "utf8").catch(() => undefined);
   const limits = new UsageLimits(redis, config);
   const wjClient = new WjClient(config, logger, dependencies.fetchImpl);
   const imageJobs = new ImageJobStore(
@@ -55,10 +59,28 @@ export async function createApplication(dependencies: AppDependencies) {
     name: "WJ MCP Server",
     mcp: config.mcpUrl.href,
     authentication: "OAuth 2.1 with PKCE",
+    jobs: new URL("/jobs", config.publicBaseUrl).href,
   }));
   app.get("/readyz", asyncHandler(async (_req, res) => {
     await redis.ping();
     res.status(200).json({ status: "ready" });
+  }));
+
+  const sendJobViewer = (_req: Request, res: Response) => {
+    if (!jobViewerHtml) {
+      res.status(503).json({ error: "job_viewer_unavailable" });
+      return;
+    }
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.status(200).send(jobViewerHtml);
+  };
+  app.get("/jobs", sendJobViewer);
+  app.get("/jobs/:jobId", sendJobViewer);
+  app.use(createPublicImageJobRouter({
+    imageJobs,
+    logger,
+    fetchImpl: dependencies.fetchImpl,
   }));
 
   const protectedResourceMetadataUrl = new URL("/.well-known/oauth-protected-resource", config.publicBaseUrl);
