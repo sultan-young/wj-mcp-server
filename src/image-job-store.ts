@@ -185,6 +185,39 @@ export class ImageJobStore {
     });
   }
 
+  /** Replace ChatGPT temporary reference download_urls with durable WJ media URLs. */
+  async replaceReferenceDownloadUrls(
+    jobId: string,
+    urls: string[],
+  ): Promise<ImageJobRecord | undefined> {
+    return this.enqueueWrite(jobId, async () => {
+      const record = await this.read(jobId);
+      if (!record) return undefined;
+      const refs = record.input.gpt_reference_images;
+      if (!refs?.length || !urls.length) return record;
+
+      const nextRefs = refs.map((file, index) => {
+        const nextUrl = urls[index]?.trim();
+        if (!nextUrl) return file;
+        return {
+          ...file,
+          download_url: nextUrl,
+        };
+      });
+
+      const next = imageJobRecordSchema.parse({
+        ...record,
+        input: {
+          ...record.input,
+          gpt_reference_images: nextRefs,
+        },
+        updatedAt: new Date().toISOString(),
+      });
+      await this.write(next, this.remainingTtlSeconds(next.expiresAt, this.jobTtlSeconds));
+      return next;
+    });
+  }
+
   async complete(
     jobId: string,
     payload: {

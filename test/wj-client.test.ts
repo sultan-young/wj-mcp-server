@@ -36,6 +36,10 @@ describe("WjClient", () => {
       prompt: "A red paper lantern in rain",
       output: { aspect_ratio: "16:9", resolution: "1K" },
       response_format: "url",
+      media_options: {
+        persist_input_images: false,
+        persist_output_images: true,
+      },
     });
   });
 
@@ -117,6 +121,10 @@ describe("WjClient", () => {
         "https://files.openai.example/target.png?signature=one",
         "https://files.openai.example/reference.png?signature=two",
       ],
+      media_options: {
+        persist_input_images: true,
+        persist_output_images: true,
+      },
     }));
   });
 

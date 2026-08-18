@@ -83,6 +83,11 @@ export const wjImageDataSchema = z.object({
   aspect_ratio: z.string().optional(),
   duration_ms: z.number().int().nonnegative().optional(),
   assets: z.array(imageAssetSchema).min(1),
+  media: z
+    .object({
+      input_images: z.array(z.string().url()).optional(),
+    })
+    .optional(),
 });
 
 export const wjImageResponseSchema = z.object({

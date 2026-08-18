@@ -66,6 +66,10 @@ export class WjClient {
         resolution: input.resolution,
       },
       response_format: "url",
+      media_options: {
+        persist_input_images: Boolean(inputImages?.length),
+        persist_output_images: true,
+      },
     };
 
     const startedAt = Date.now();

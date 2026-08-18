@@ -137,6 +137,10 @@ export class GenerationService {
               aspectRatio: outcome.result.aspect_ratio ?? running.aspectRatio,
             });
           }
+          const persistedRefs = outcome.result?.media?.input_images;
+          if (persistedRefs?.length) {
+            await this.jobs.replaceReferenceDownloadUrls(jobId, persistedRefs);
+          }
           if (outcome.failures[0]) {
             await this.jobs.appendPromptOutcome(jobId, {
               index,
