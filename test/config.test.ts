@@ -12,6 +12,8 @@ describe("loadConfig", () => {
     expect(config.IMAGE_MAX_CONCURRENCY).toBe(10);
     expect(config.IMAGE_RESULT_TTL_SECONDS).toBe(2_592_000);
     expect(config.imageResourceDomains).toContain("https://wj.example.com");
+    expect(config.imageResourceDomains).toContain("https://img.downk.cc");
+    expect(config.imageResourceDomains).toContain("https://wj-ai-gen.s3.bitiful.net");
   });
 
   it("rejects an HTTP public URL in production", () => {

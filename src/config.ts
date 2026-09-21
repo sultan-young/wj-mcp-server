@@ -42,7 +42,10 @@ const envSchema = z.object({
   IMAGE_JOB_TTL_SECONDS: z.coerce.number().int().min(60).max(7_200).default(1_200),
   LOGIN_ATTEMPTS_PER_15_MINUTES: z.coerce.number().int().min(1).max(1000).default(10),
   REGISTRATIONS_PER_HOUR: z.coerce.number().int().min(1).max(10_000).default(200),
-  IMAGE_RESOURCE_DOMAINS: csv.default(["https://img.downk.cc"]),
+  IMAGE_RESOURCE_DOMAINS: csv.default([
+    "https://img.downk.cc",
+    "https://wj-ai-gen.s3.bitiful.net",
+  ]),
 });
 
 export type AppConfig = ReturnType<typeof loadConfig>;

@@ -301,13 +301,25 @@ describe("WJ MCP server", () => {
         ui: expect.objectContaining({
           domain: "http://127.0.0.1:6070",
           csp: expect.objectContaining({
-            resourceDomains: expect.arrayContaining(["https://img.downk.cc"]),
+            resourceDomains: expect.arrayContaining([
+              "https://img.downk.cc",
+              "https://wj-ai-gen.s3.bitiful.net",
+            ]),
           }),
         }),
         "openai/widgetCSP": expect.objectContaining({
-          resource_domains: expect.arrayContaining(["https://img.downk.cc"]),
-          connect_domains: expect.arrayContaining(["https://img.downk.cc"]),
-          redirect_domains: expect.arrayContaining(["https://img.downk.cc"]),
+          resource_domains: expect.arrayContaining([
+            "https://img.downk.cc",
+            "https://wj-ai-gen.s3.bitiful.net",
+          ]),
+          connect_domains: expect.arrayContaining([
+            "https://img.downk.cc",
+            "https://wj-ai-gen.s3.bitiful.net",
+          ]),
+          redirect_domains: expect.arrayContaining([
+            "https://img.downk.cc",
+            "https://wj-ai-gen.s3.bitiful.net",
+          ]),
         }),
         "openai/widgetDescription": expect.stringContaining("WJ-generated images"),
       }),
