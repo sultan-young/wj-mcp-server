@@ -14,8 +14,8 @@
 - 部署前在 WJ-SREVER 执行 `node scripts/seed_open_platform.js`，确保 MCP 用的 Key 具备 `openApi.productDraft`（对已有利润试算授权的 Key 会自动补授）
 - 试算不要求 SKU；录入必须提供商品池中真实存在的 SKU，并由 WJ 服务端重新计算后保存
 - 录入名称在前端为可选字段；通过 MCP 录入时由 GPT 使用用户名称或自动生成简短名称
-- `generate_image` 立刻返回 `jobId`；后台按 `IMAGE_MAX_CONCURRENCY` 并发生成；进行中任务窗口默认 20 分钟（`IMAGE_JOB_TTL_SECONDS`）
-- 完成后同一 `jobId` 在 Redis 保留约 30 天（`IMAGE_RESULT_TTL_SECONDS`），可通过 `get_image_job_result(job_id)` 无额度恢复
+- `generate_image` 立刻返回 `jobId`；后台按 `IMAGE_MAX_CONCURRENCY` 并发生成。进行中超过 `IMAGE_JOB_TTL_SECONDS`（默认 20 分钟）会标为超时，不再继续当作生成中
+- 完成、失败、超时后，同一 `jobId` 都在 Redis 保留约 30 天（`IMAGE_RESULT_TTL_SECONDS`），可通过 `get_image_job_result(job_id)` 或公开查询页读回
 - 组件在生成中轮询 `get_image_job_result`；各 prompt 完成后逐步展示 assets；完成后按结果快照 / `jobId` 恢复；不可用时以纯文本原图 HTTPS 链接兜底（不返回 Markdown 图片块）
 - 支持 `nano-banana-2`、常用宽高比、`1K/2K/4K` 和 ChatGPT 附件参考图
 - MCP Apps 图片组件：左侧主图、右侧缩略图切换，主图下方展示分辨率/耗时等元信息并提供打开原图
@@ -76,7 +76,7 @@ pnpm dev
 2. 在宝塔新建该子域名的 Nginx 站点并申请 Let's Encrypt 证书。
 3. 把本项目上传到服务器，执行 `cp .env.example .env`。
 4. 执行 `pnpm secrets`，把输出写入 `.env`。
-5. 设置 `WJ_API_KEY`、强共享口令、真实 `PUBLIC_BASE_URL` 和 `ALLOWED_HOSTS`。
+5. 设置 `WJ_API_KEY`、强共享口令、真实 `PUBLIC_BASE_URL` 和 `ALLOWED_HOSTS`。同机 Docker 会把调用 wj-server 的地址覆盖为 `http://wj-server:5000`（共用网络 `wj-internal`）。对外的 `PUBLIC_BASE_URL` 仍用 HTTPS。
 6. 参考 `deploy/nginx.conf.example` 配置反向代理；SSL 仍交给宝塔管理。
 7. 启动并检查：
 

@@ -16,6 +16,13 @@ describe("loadConfig", () => {
     expect(config.imageResourceDomains).toContain("https://wj-ai-gen.s3.bitiful.net");
   });
 
+  it("does not expose an internal HTTP API origin to the widget", () => {
+    const config = testConfig({ WJ_API_BASE_URL: "http://wj-server:5000" });
+    expect(config.wjApiBaseUrl.href).toBe("http://wj-server:5000/");
+    expect(config.imageResourceDomains).not.toContain("http://wj-server:5000");
+    expect(config.imageResourceDomains).toContain("https://wj-ai-gen.s3.bitiful.net");
+  });
+
   it("rejects an HTTP public URL in production", () => {
     expect(() => testConfig({ NODE_ENV: "production" })).toThrow("PUBLIC_BASE_URL must use https");
   });

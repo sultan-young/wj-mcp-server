@@ -58,4 +58,47 @@ describe("ImageJobStore progressive append", () => {
       pending: 0,
     });
   });
+
+  it("keeps a timed-out job queryable instead of deleting it", async () => {
+    const store = new ImageJobStore(memoryRedis(), -1, 2_592_000);
+    const record = await store.create({
+      subject: "subject",
+      terminalId: "terminal",
+      input: {
+        prompts: ["one"],
+        model: "gpt-image-2",
+        aspect_ratio: "1:1",
+        resolution: "1K",
+      },
+    });
+
+    const timedOut = await store.getByJobId(record.jobId);
+    expect(timedOut?.status).toBe("timed_out");
+    expect(timedOut?.error).toContain("timed out");
+
+    const again = await store.getByJobId(record.jobId);
+    expect(again?.status).toBe("timed_out");
+    expect(again?.jobId).toBe(record.jobId);
+  });
+
+  it("keeps a failed job queryable after the working deadline", async () => {
+    const store = new ImageJobStore(memoryRedis(), -1, 2_592_000);
+    const record = await store.create({
+      subject: "subject",
+      terminalId: "terminal",
+      input: {
+        prompts: ["one"],
+        model: "gpt-image-2",
+        aspect_ratio: "1:1",
+        resolution: "1K",
+      },
+    });
+
+    const failed = await store.fail(record.jobId, "upstream failed");
+    expect(failed?.status).toBe("failed");
+
+    const loaded = await store.getByJobId(record.jobId);
+    expect(loaded?.status).toBe("failed");
+    expect(loaded?.error).toBe("upstream failed");
+  });
 });

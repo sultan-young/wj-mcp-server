@@ -77,7 +77,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
 
   const mcpUrl = new URL("/mcp", publicBaseUrl);
   const resourceDomains = new Set(parsed.IMAGE_RESOURCE_DOMAINS);
-  resourceDomains.add(wjApiBaseUrl.origin);
+  // 内网 http://wj-server:5000 只用于服务端调用，不能进 ChatGPT 组件的外链白名单。
+  if (wjApiBaseUrl.protocol === "https:") {
+    resourceDomains.add(wjApiBaseUrl.origin);
+  }
 
   return {
     ...parsed,

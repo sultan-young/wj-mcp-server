@@ -67,9 +67,9 @@ export class ImageJobStore {
 
   constructor(
     private readonly redis: RedisClient,
-    /** Working-window TTL while queued/running (default ~20 minutes). */
+    /** Deadline for a queued/running job before it is marked timed out (default ~20 minutes). */
     private readonly jobTtlSeconds: number,
-    /** Retention TTL after completion (default ~30 days). */
+    /** How long any job record stays queryable (default ~30 days). */
     private readonly durableTtlSeconds: number,
   ) {}
 
@@ -96,7 +96,7 @@ export class ImageJobStore {
       assets: [],
       failures: [],
     });
-    await this.write(record, this.jobTtlSeconds);
+    await this.write(record, this.durableTtlSeconds);
     return record;
   }
 
@@ -125,7 +125,7 @@ export class ImageJobStore {
         status: "running",
         updatedAt: new Date().toISOString(),
       });
-      await this.write(next, this.remainingTtlSeconds(next.expiresAt, this.jobTtlSeconds));
+      await this.write(next, this.durableTtlSeconds);
       return next;
     });
   }
@@ -180,7 +180,7 @@ export class ImageJobStore {
         failures,
         updatedAt: new Date().toISOString(),
       });
-      await this.write(next, this.remainingTtlSeconds(next.expiresAt, this.jobTtlSeconds));
+      await this.write(next, this.durableTtlSeconds);
       return next;
     });
   }
@@ -213,7 +213,7 @@ export class ImageJobStore {
         },
         updatedAt: new Date().toISOString(),
       });
-      await this.write(next, this.remainingTtlSeconds(next.expiresAt, this.jobTtlSeconds));
+      await this.write(next, this.durableTtlSeconds);
       return next;
     });
   }
@@ -261,13 +261,15 @@ export class ImageJobStore {
       const record = await this.read(jobId);
       if (!record) return undefined;
       if (record.status === "completed" || record.status === "timed_out") return record;
+      const now = new Date();
       const next = imageJobRecordSchema.parse({
         ...record,
         status: "failed",
         error,
-        updatedAt: new Date().toISOString(),
+        updatedAt: now.toISOString(),
+        expiresAt: new Date(now.getTime() + this.durableTtlSeconds * 1000).toISOString(),
       });
-      await this.write(next, this.remainingTtlSeconds(next.expiresAt, this.jobTtlSeconds));
+      await this.write(next, this.durableTtlSeconds);
       return next;
     });
   }
@@ -317,13 +319,16 @@ export class ImageJobStore {
     if (Date.parse(record.expiresAt) > Date.now()) return record;
 
     if (record.status === "queued" || record.status === "running") {
+      const now = new Date();
+      const minutes = Math.max(1, Math.round(this.jobTtlSeconds / 60));
       const next = imageJobRecordSchema.parse({
         ...record,
         status: "timed_out",
-        error: "Image job timed out after 20 minutes.",
-        updatedAt: new Date().toISOString(),
+        error: `Image job timed out after ${minutes} minutes.`,
+        updatedAt: now.toISOString(),
+        expiresAt: new Date(now.getTime() + this.durableTtlSeconds * 1000).toISOString(),
       });
-      await this.write(next, 60);
+      await this.write(next, this.durableTtlSeconds);
       return next;
     }
 
@@ -349,10 +354,6 @@ export class ImageJobStore {
     await this.redis.set(`${JOB_KEY_PREFIX}${record.jobId}`, JSON.stringify(record), { EX: ttl });
   }
 
-  private remainingTtlSeconds(expiresAt: string, fallback: number): number {
-    const remaining = Math.ceil((Date.parse(expiresAt) - Date.now()) / 1000);
-    return Math.max(1, Number.isFinite(remaining) ? remaining : fallback);
-  }
 }
 
 export function computeProgress(record: Pick<ImageJobRecord, "promptTotal" | "assets" | "failures" | "status">): ImageJobProgress {
