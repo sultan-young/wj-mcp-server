@@ -86,6 +86,27 @@ describe("WjClient", () => {
     }));
   });
 
+  it("keeps a long upstream error instead of replacing it with the HTTP status", async () => {
+    const traceback = `litellm.APIConnectionError: Grsai API 错误: 该模型正在修复中\n${"x".repeat(800)}`;
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: false,
+      error: { code: "upstream_error", message: traceback },
+      meta: { call_data: { call_id: "call-long" } },
+    }), { status: 502, headers: { "content-type": "application/json" } }));
+    const client = new WjClient(testConfig(), testLogger(), fetchMock);
+
+    await expect(client.generateImage({
+      model: "gpt-image-2",
+      prompt: "test",
+      aspect_ratio: "1:1",
+      resolution: "1K",
+    })).rejects.toEqual(expect.objectContaining({
+      status: 502,
+      message: traceback,
+      callData: { call_id: "call-long" },
+    }));
+  });
+
   it("forwards ChatGPT attachment download URLs as WJ input_images", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       success: true,

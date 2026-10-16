@@ -330,17 +330,22 @@ export class WjClient {
 function extractUpstreamMessage(body: unknown): string | undefined {
   if (!body || typeof body !== "object") return undefined;
   const record = body as Record<string, unknown>;
-  if (typeof record.message === "string" && record.message.length <= 500) return record.message;
+  const top = readErrorText(record.message);
+  if (top) return top;
   const err = record.error;
-  if (typeof err === "string" && err.length <= 500) return err;
+  const errText = readErrorText(err);
+  if (errText) return errText;
   if (err && typeof err === "object") {
-    const msg = (err as { message?: unknown }).message;
-    if (typeof msg === "string" && msg.length <= 500) return msg;
+    const nested = readErrorText((err as { message?: unknown }).message);
+    if (nested) return nested;
   }
-  if (typeof record.error_description === "string" && record.error_description.length <= 500) {
-    return record.error_description;
-  }
-  return undefined;
+  return readErrorText(record.error_description);
+}
+
+function readErrorText(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const text = value.trim();
+  return text || undefined;
 }
 
 function objectKeys(value: unknown): string[] | undefined {
