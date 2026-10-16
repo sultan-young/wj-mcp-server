@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { IMAGE_MODEL_IDS, isImageModelId } from "./wj/image-catalog.js";
+
 const booleanFromString = z.preprocess((value) => {
   if (typeof value !== "string") return value;
   return value.toLowerCase() === "true";
@@ -24,8 +26,11 @@ const envSchema = z.object({
   WJ_API_BASE_URL: z.string().url().default("https://wj.zaowuwujie.ltd"),
   WJ_API_KEY: z.string().min(1),
   WJ_IMAGE_PATH: z.string().startsWith("/").default("/api/v1/proxy/ai/generate/image"),
-  WJ_DEFAULT_MODEL: z.enum(["gpt-image-2", "nano-banana-2"]).default("gpt-image-2"),
-  WJ_ALLOWED_MODELS: csv.default(["gpt-image-2", "nano-banana-2"]),
+  WJ_DEFAULT_MODEL: z.enum(IMAGE_MODEL_IDS).default("gpt-image-2"),
+  WJ_ALLOWED_MODELS: csv.default([...IMAGE_MODEL_IDS]).refine(
+    (models) => models.every((model) => isImageModelId(model)),
+    { message: "WJ_ALLOWED_MODELS contains a model that wj-mcp does not support" },
+  ),
   WJ_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(10_000).max(600_000).default(330_000),
 
   MCP_SHARED_PASSWORD: z.string().min(12),

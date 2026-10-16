@@ -8,6 +8,13 @@ describe("loadConfig", () => {
     const config = testConfig();
     expect(config.mcpUrl.href).toBe("http://127.0.0.1:6070/mcp");
     expect(config.WJ_DEFAULT_MODEL).toBe("gpt-image-2");
+    expect(config.WJ_ALLOWED_MODELS).toEqual([
+      "gpt-image-2",
+      "nano-banana-2",
+      "gpt-image-2.5",
+      "gpt-image-2.5-flare",
+      "gpt-image-2.5-sunburst",
+    ]);
     expect(config.REGISTRATIONS_PER_HOUR).toBe(200);
     expect(config.IMAGE_MAX_CONCURRENCY).toBe(10);
     expect(config.IMAGE_RESULT_TTL_SECONDS).toBe(2_592_000);
@@ -25,6 +32,10 @@ describe("loadConfig", () => {
 
   it("rejects an HTTP public URL in production", () => {
     expect(() => testConfig({ NODE_ENV: "production" })).toThrow("PUBLIC_BASE_URL must use https");
+  });
+
+  it("rejects an unknown model in the allowlist", () => {
+    expect(() => testConfig({ WJ_ALLOWED_MODELS: "gpt-image-2,not-a-model" })).toThrow("WJ_ALLOWED_MODELS");
   });
 
   it("requires strong rotating cookie keys", () => {

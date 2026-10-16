@@ -38,8 +38,8 @@ The WJ image component shows results on its own. Use `get_image_job_result` with
 
 1. Preserve the user's subject, style, composition, aspect ratio, resolution, and reference-image intent.
 2. Always pass `prompts` as a string array (1–10). A single image uses a one-element array.
-3. Default to `gpt-image-2`, `1K`, and `1:1` only when the user does not specify supported alternatives. When using `nano-banana-2`, default resolution to `2K` unless the user specifies otherwise.
-4. Use `nano-banana-2` only when the user explicitly requests it.
+3. Default to `gpt-image-2`, `1K`, and `1:1` only when the user does not specify supported alternatives. When using `nano-banana-2`, default resolution to `2K` unless the user specifies otherwise. `gpt-image-2.5`, `gpt-image-2.5-flare`, and `gpt-image-2.5-sunburst` default to `1K`.
+4. Use `nano-banana-2`, `gpt-image-2.5`, `gpt-image-2.5-flare`, or `gpt-image-2.5-sunburst` only when the user explicitly requests that model. Pass only a resolution and aspect ratio supported by the selected model.
 5. For same-prompt variants within one shared-reference call, repeat that text in `prompts`. For different texts with the same references, put each distinct text in `prompts`.
 6. Pass ChatGPT attachments through `gpt_reference_images` (official file params, up to 10). Within one call they are shared by every `prompts` entry.
 7. Preserve attachment order for labels such as image one and image two. When editing, put the image being changed first in `gpt_reference_images`, then other references, and describe the change in the relevant `prompts` entry.

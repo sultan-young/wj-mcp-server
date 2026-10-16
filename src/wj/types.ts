@@ -1,8 +1,19 @@
 import { z } from "zod";
 
-export const imageModelSchema = z.enum(["gpt-image-2", "nano-banana-2"]);
-export const aspectRatioSchema = z.enum(["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "1:2", "2:1"]);
-export const resolutionSchema = z.enum(["1K", "2K", "4K"]);
+import {
+  ALL_ASPECT_RATIOS,
+  ALL_RESOLUTIONS,
+  IMAGE_MODEL_IDS,
+  defaultResolutionForModel,
+  imageModelOptionSummary,
+  validateModelImageOptions,
+} from "./image-catalog.js";
+
+export { defaultResolutionForModel };
+
+export const imageModelSchema = z.enum(IMAGE_MODEL_IDS);
+export const aspectRatioSchema = z.enum(ALL_ASPECT_RATIOS);
+export const resolutionSchema = z.enum(ALL_RESOLUTIONS);
 
 export const MAX_GENERATE_PROMPTS = 10;
 
@@ -29,11 +40,17 @@ export const generateImageInputSchema = z.object({
     .describe(
       `One or more image prompts (1–${MAX_GENERATE_PROMPTS}). Each entry generates one image; the server runs them concurrently. For a single image, pass a one-element array.`,
     ),
-  model: imageModelSchema.default("gpt-image-2").describe("Use gpt-image-2 unless the user explicitly requests another model."),
-  aspect_ratio: aspectRatioSchema.default("1:1").describe("Output image aspect ratio (shared by all prompts)."),
+  model: imageModelSchema.default("gpt-image-2").describe(
+    `Use gpt-image-2 unless the user explicitly requests another model. ${imageModelOptionSummary()}`,
+  ),
+  aspect_ratio: aspectRatioSchema.default("1:1").describe(
+    "Output image aspect ratio shared by all prompts. Default remains 1:1. Use only a ratio supported by the selected model.",
+  ),
   resolution: resolutionSchema
     .optional()
-    .describe("Defaults to 1K for gpt-image-2 and 2K for nano-banana-2 unless the user explicitly requests another supported size."),
+    .describe(
+      "Optional. Default remains 1K, except nano-banana-2 which defaults to 2K. gpt-image-2.5, gpt-image-2.5-flare, and gpt-image-2.5-sunburst also default to 1K. Use only a resolution supported by the selected model.",
+    ),
   gpt_reference_images: z
     .array(openAIFileSchema)
     .max(10)
@@ -41,11 +58,11 @@ export const generateImageInputSchema = z.object({
     .describe(
       "Optional ChatGPT image attachments shared by every prompt in this call (openai/fileParams). Up to 10. Preserve attachment order; when editing, put the image being edited first, then other references. Describe changes in each prompts entry.",
     ),
+}).superRefine((value, ctx) => {
+  for (const issue of validateModelImageOptions(value.model, value.aspect_ratio, value.resolution)) {
+    ctx.addIssue({ code: "custom", path: [issue.path], message: issue.message });
+  }
 });
-
-export function defaultResolutionForModel(model: z.infer<typeof imageModelSchema>): z.infer<typeof resolutionSchema> {
-  return model === "nano-banana-2" ? "2K" : "1K";
-}
 
 export type GenerateImageInput = Omit<z.infer<typeof generateImageInputSchema>, "resolution"> & {
   resolution: z.infer<typeof resolutionSchema>;

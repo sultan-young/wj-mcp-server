@@ -17,7 +17,7 @@
 - `generate_image` 立刻返回 `jobId`；后台按 `IMAGE_MAX_CONCURRENCY` 并发生成。进行中超过 `IMAGE_JOB_TTL_SECONDS`（默认 20 分钟）会标为超时，不再继续当作生成中
 - 完成、失败、超时后，同一 `jobId` 都在 Redis 保留约 30 天（`IMAGE_RESULT_TTL_SECONDS`），可通过 `get_image_job_result(job_id)` 或公开查询页读回
 - 组件在生成中轮询 `get_image_job_result`；各 prompt 完成后逐步展示 assets；完成后按结果快照 / `jobId` 恢复；不可用时以纯文本原图 HTTPS 链接兜底（不返回 Markdown 图片块）
-- 支持 `nano-banana-2`、常用宽高比、`1K/2K/4K` 和 ChatGPT 附件参考图
+- 生图模型与 wj-ai-server 对齐：`gpt-image-2`、`nano-banana-2`、`gpt-image-2.5`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`。默认仍是 `gpt-image-2`、`1:1`；`gpt-image-2` 默认 `1K`，`nano-banana-2` 默认 `2K`。分辨率和比例按模型校验，并支持 ChatGPT 附件参考图
 - MCP Apps 图片组件：左侧主图、右侧缩略图切换，主图下方展示分辨率/耗时等元信息并提供打开原图
 - OAuth 2.1 授权码流程、PKCE、动态客户端注册和刷新令牌
 - Redis 持久化 OAuth 数据、分钟/每日限额和登录防爆破
